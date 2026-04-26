@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# sl-attach — open or attach a tmux session with one window per active logger
+set -eu
+
+SESSION=${SESSION:-pi-monitor}
+
+usage() {
+  cat <<EOF
+Usage: sl-attach
+
+Opens (or attaches to) tmux session "$SESSION" with one window per
+active uart-logger@* unit, each running journalctl -f for that unit.
+
+EOF
+}
+
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && { usage; exit 0; }
+
+active_ports() {
+  systemctl list-units --no-legend --type=service 'uart-logger@*' \
+    | awk '{print $1}' \
+    | sed -e 's/^uart-logger@//' -e 's/\.service$//'
+}
+
+ports=$(active_ports)
+if [ -z "$ports" ]; then
+  echo 'No active uart-logger@* units. Run: sl-monitor up' >&2
+  exit 1
+fi
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+first=1
+for port in $ports; do
+  cmd="journalctl -u uart-logger@${port} -f --output=cat"
+  if [ $first -eq 1 ]; then
+    tmux new-session -d -s "$SESSION" -n "$port" "$cmd"
+    first=0
+  else
+    tmux new-window -t "$SESSION" -n "$port" "$cmd"
+  fi
+done
+
+exec tmux attach -t "$SESSION"
