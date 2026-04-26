@@ -938,6 +938,21 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "sl-flash rejects file with spaces or special chars in name" {
+  echo dummy > "$FW_DIR/bad name.bin"
+  run bin/sl-flash "$FW_DIR/bad name.bin"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported characters"* ]]
+}
+
+@test "sl-flash rejects symlink resolving outside firmware dir" {
+  echo dummy > "$TMPDIR/outside.bin"
+  ln -s "$TMPDIR/outside.bin" "$FW_DIR/link.bin"
+  run bin/sl-flash "$FW_DIR/link.bin"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$FW_DIR"* ]]
+}
+
 @test "sl-flash invokes openocd with canonical command for valid .bin" {
   echo dummy > "$FW_DIR/firmware.bin"
   run bin/sl-flash "$FW_DIR/firmware.bin"
@@ -955,8 +970,10 @@ teardown() {
 #!/usr/bin/env bash
 # sl-flash — flash an STM32C091 .bin via OpenOCD over ST-Link
 set -eu
+set -o pipefail
 
 FW_DIR=${FW_DIR:-/var/lib/pi-monitor/firmware}
+FW_DIR=${FW_DIR%/}
 OPENOCD=${OPENOCD:-/usr/local/bin/openocd}
 
 usage() {
@@ -972,13 +989,25 @@ EOF
 [ $# -eq 1 ] || usage
 BIN=$1
 
-case $BIN in *.bin) ;; *) echo "sl-flash: not a .bin file: $BIN" >&2; exit 3 ;; esac
+case $BIN in
+  *.bin) ;;
+  *) echo "sl-flash: not a .bin file: $BIN" >&2; exit 3 ;;
+esac
 
 # Realpath check: refuse anything outside FW_DIR (no path traversal via symlinks).
 ABS=$(readlink -f -- "$BIN") || { echo "sl-flash: cannot resolve $BIN" >&2; exit 3; }
 case $ABS in
   "$FW_DIR"/*) ;;
   *) echo "sl-flash: $BIN is not under $FW_DIR" >&2; exit 3 ;;
+esac
+
+# Defense in depth: openocd's -c argument is parsed by Tcl. Reject any path
+# containing whitespace, quotes, or shell/Tcl metachars to prevent argument
+# splitting or command injection inside the program command.
+case $ABS in
+  *[[:space:]]*|*\"*|*\'*|*\$*|*\;*|*\\*|*\{*|*\}*|*\[*|*\]*)
+    echo "sl-flash: path contains unsupported characters: $ABS" >&2
+    exit 3 ;;
 esac
 
 [ -r "$ABS" ] || { echo "sl-flash: cannot read $ABS" >&2; exit 3; }
@@ -988,6 +1017,12 @@ exec "$OPENOCD" \
   -f target/stm32c0x.cfg \
   -c "program $ABS verify reset exit 0x08000000"
 ```
+
+**Notes on the directed enhancements over the original spec:**
+- `set -o pipefail` matches project convention (sl-monitor, sl-attach).
+- `FW_DIR=${FW_DIR%/}` strips a trailing slash so `case $ABS in "$FW_DIR"/*)` doesn't match `dir//file`.
+- The bad-character case statement closes the residual injection surface inside the openocd `-c "program $ABS …"` Tcl string. Without it, a filename like `foo.bin verify reset exit; reboot.bin` (if it could ever get past the `*.bin` and dir-check, which it can if the FW_DIR owner creates it) would be parsed as multiple Tcl tokens. Easier to just refuse weird names.
+- Two extra tests cover the bad-character path and the symlink-to-outside path.
 
 **Step 3: chmod +x, test, commit**
 
