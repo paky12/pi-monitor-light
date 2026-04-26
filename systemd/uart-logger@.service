@@ -1,0 +1,51 @@
+[Unit]
+Description=UART logger on /dev/%i
+After=dev-%i.device
+BindsTo=dev-%i.device
+
+[Service]
+Type=simple
+User=pi-monitor
+Group=pi-monitor
+UMask=0002
+RuntimeDirectory=pi-monitor
+EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
+
+ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
+ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
+
+ExecStart=/bin/sh -c '\
+  LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
+  echo "$LOG" > /run/pi-monitor/%i.current; \
+  echo "============================================================" >> "$LOG"; \
+  echo "=== SESSION START $(date -Iseconds)  name=${NAME}  dev=/dev/%i  baud=${BAUD}" >> "$LOG"; \
+  echo "============================================================" >> "$LOG"; \
+  exec /usr/bin/cat /dev/%i | /usr/bin/ts "%%Y-%%m-%%d %%H:%%M:%%.S" | /usr/bin/tee -a "$LOG"'
+
+ExecStopPost=/bin/sh -c '\
+  LOG=$(cat /run/pi-monitor/%i.current 2>/dev/null) || exit 0; \
+  [ -f "$LOG" ] || exit 0; \
+  START=$(stat -c %%Y "$LOG"); \
+  NOW=$(date +%%s); \
+  D=$((NOW-START)); \
+  echo "============================================================" >> "$LOG"; \
+  echo "=== SESSION END $(date -Iseconds)  duration=$((D/60))m $((D%%60))s" >> "$LOG"; \
+  echo "============================================================" >> "$LOG"'
+
+# Safety net only — primary restart path is udev SYSTEMD_WANTS on device re-add.
+# Restart= does NOT fire when systemd itself stopped the unit (BindsTo=).
+Restart=on-failure
+RestartSec=2
+
+Nice=10
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/pi-monitor /run/pi-monitor
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
