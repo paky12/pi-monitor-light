@@ -5,14 +5,24 @@ set -u
 LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
 
 echo '== Logger units =='
-systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' \
-  || echo '  (none active)'
+units=$(systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' 2>/dev/null || true)
+if [ -n "$units" ]; then
+  printf '%s\n' "$units"
+else
+  echo '  (none active)'
+fi
 
 echo
 echo '== Log sizes =='
-if [ -d "$LOG_DIR" ]; then
-  du -sh "$LOG_DIR"/* 2>/dev/null | sort -h \
-    || echo '  (empty)'
-else
+if [ ! -d "$LOG_DIR" ]; then
   echo "  ($LOG_DIR does not exist yet)"
+else
+  shopt -s nullglob
+  files=("$LOG_DIR"/*)
+  shopt -u nullglob
+  if [ ${#files[@]} -gt 0 ]; then
+    du -sh "${files[@]}" 2>/dev/null | sort -h
+  else
+    echo '  (empty)'
+  fi
 fi
