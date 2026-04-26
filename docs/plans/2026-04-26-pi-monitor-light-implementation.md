@@ -92,8 +92,11 @@ git commit -m "feat: scaffold repo directory layout"
 #!/usr/bin/env bats
 
 @test "systemd unit file passes systemd-analyze verify" {
+  # Pass the file by path; --root= would look under <root>/etc/systemd/system/
+  # for the unit name, not resolve the file argument. --recursive-errors=no
+  # suppresses errors for EnvironmentFile= paths that exist only on the Pi.
   run systemd-analyze verify --recursive-errors=no \
-      --root=. systemd/uart-logger@.service
+      systemd/uart-logger@.service
   [ "$status" -eq 0 ]
 }
 
