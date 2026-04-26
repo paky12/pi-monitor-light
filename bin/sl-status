@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# sl-status — show running loggers + log dir sizes
+set -u
+
+LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
+
+echo '== Logger units =='
+systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' \
+  || echo '  (none active)'
+
+echo
+echo '== Log sizes =='
+if [ -d "$LOG_DIR" ]; then
+  du -sh "$LOG_DIR"/* 2>/dev/null | sort -h \
+    || echo '  (empty)'
+else
+  echo "  ($LOG_DIR does not exist yet)"
+fi
