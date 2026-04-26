@@ -833,7 +833,7 @@ git commit -m "feat: add sl-status overview wrapper"
 ```bash
 #!/usr/bin/env bash
 # sl-attach — open or attach a tmux session with one window per active logger
-set -eu
+set -euo pipefail
 
 SESSION=${SESSION:-pi-monitor}
 
@@ -847,7 +847,9 @@ active uart-logger@* unit, each running journalctl -f for that unit.
 EOF
 }
 
-[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && { usage; exit 0; }
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
 
 active_ports() {
   systemctl list-units --no-legend --type=service 'uart-logger@*' \
