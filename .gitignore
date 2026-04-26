@@ -1,0 +1,6 @@
+*.swp
+*.bak
+*~
+/openocd-src/
+/build/
+.DS_Store
