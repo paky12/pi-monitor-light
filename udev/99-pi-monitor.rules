@@ -1,0 +1,5 @@
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", ACTION=="add", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="uart-logger@%k.service"
+
+SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", ACTION=="add", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="uart-logger@%k.service"
