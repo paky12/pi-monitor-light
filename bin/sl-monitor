@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# sl-monitor — start/stop UART logger systemd units based on /etc/pi-monitor-light/ports.conf
+set -eu
+
+CONF=/etc/pi-monitor-light/ports.conf
+ENV_DIR=/etc/pi-monitor-light
+LIB=/usr/local/share/pi-monitor-light/parse-ports.sh
+
+usage() {
+  cat >&2 <<EOF
+Usage: sl-monitor up|down|restart [port]
+
+  up               enable + start logger units for all ports in $CONF
+  down             stop + disable all uart-logger@* units
+  restart [port]   restart one or all units
+EOF
+  exit 2
+}
+
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    exec sudo --preserve-env=PATH "$0" "$@"
+  fi
+}
+
+write_env_files() {
+  # shellcheck source=/dev/null
+  . "$LIB"
+  # Pre-check: parse_ports failures inside `< <(...)` process substitution
+  # do not propagate under set -e (subshell). Run once first to abort early
+  # with a clear non-zero exit if the config is invalid.
+  parse_ports "$CONF" >/dev/null
+  while read -r dev name baud; do
+    printf 'NAME=%s\nBAUD=%s\n' "$name" "$baud" \
+      > "$ENV_DIR/ports.conf.env-$dev"
+  done < <(parse_ports "$CONF")
+}
+
+active_units() {
+  systemctl list-units --type=service --no-legend 'uart-logger@*' \
+    | awk '{print $1}'
+}
+
+cmd_up() {
+  require_root "$@"
+  write_env_files
+  # Pre-check: same set -e / process-substitution gotcha as in write_env_files.
+  parse_ports "$CONF" >/dev/null
+  while read -r dev _ _; do
+    systemctl enable --now "uart-logger@${dev}.service"
+  done < <(parse_ports "$CONF")
+}
+
+cmd_down() {
+  require_root "$@"
+  for u in $(active_units); do
+    systemctl disable --now "$u" || true
+  done
+}
+
+cmd_restart() {
+  require_root "$@"
+  if [ "${1:-}" ]; then
+    systemctl restart "uart-logger@${1}.service"
+  else
+    for u in $(active_units); do
+      systemctl restart "$u"
+    done
+  fi
+}
+
+case ${1:-} in
+  up)      shift; cmd_up "$@" ;;
+  down)    shift; cmd_down "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
+  *)       usage ;;
+esac
