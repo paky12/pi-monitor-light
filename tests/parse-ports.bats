@@ -36,3 +36,39 @@ setup() {
   run parse_ports /no/such/file.conf
   [ "$status" -ne 0 ]
 }
+
+@test "parse_ports rejects malformed line (return code 3)" {
+  run parse_ports tests/fixtures/ports-malformed.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"malformed"* ]]
+}
+
+@test "parse_ports rejects trailing garbage" {
+  run parse_ports tests/fixtures/ports-trailing-garbage.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"trailing garbage"* ]]
+}
+
+@test "parse_ports allows trailing # comments on data lines" {
+  run parse_ports tests/fixtures/ports-trailing-comment.conf
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "ttyUSB0 STM 115200" ]
+}
+
+@test "parse_ports rejects invalid device name" {
+  run parse_ports tests/fixtures/ports-bad-dev.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid device name"* ]]
+}
+
+@test "parse_ports rejects name with path traversal" {
+  run parse_ports tests/fixtures/ports-bad-name.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid name"* ]]
+}
+
+@test "parse_ports rejects duplicate names (return code 6)" {
+  run parse_ports tests/fixtures/ports-dup-name.conf
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"duplicate name"* ]]
+}
