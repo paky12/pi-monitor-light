@@ -301,6 +301,14 @@ ttyUSB0        STM            115200
 ttyUSB1        EL             115200
 ```
 
+**Format & validation rules** (enforced by `lib/parse-ports.sh`; `sl-monitor up` aborts on any violation rather than silently dropping the bad port):
+
+- `<kernel-device>`: must match `ttyUSB<digits>` or `ttyACM<digits>` (no `/dev/` prefix). Matches the udev rule and the systemd template's instance-name expectations.
+- `<name>`: `[A-Za-z0-9_-]+`. Used as a log subdirectory under `/var/log/pi-monitor/` and embedded in an `EnvironmentFile`, so it must be filesystem-safe and free of shell/path metacharacters.
+- `<baud>`: positive integer (digits only).
+- Duplicate `<name>` values across lines are rejected — two ports cannot share a log directory.
+- Trailing `#`-prefixed comments on data lines are allowed (e.g. `ttyUSB0 STM 115200 # primary`); any other trailing tokens are rejected as garbage.
+
 `sl-monitor up` parses this and writes one `EnvironmentFile` per port:
 ```
 # /etc/pi-monitor-light/ports.conf.env-ttyUSB0

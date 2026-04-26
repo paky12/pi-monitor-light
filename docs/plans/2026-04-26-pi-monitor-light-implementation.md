@@ -224,6 +224,12 @@ This is the only piece with real logic worth careful TDD.
 - Create: `tests/fixtures/ports-comments.conf`
 - Create: `tests/fixtures/ports-too-many.conf`
 - Create: `tests/fixtures/ports-bad-baud.conf`
+- Create: `tests/fixtures/ports-malformed.conf`
+- Create: `tests/fixtures/ports-trailing-garbage.conf`
+- Create: `tests/fixtures/ports-trailing-comment.conf`
+- Create: `tests/fixtures/ports-bad-dev.conf`
+- Create: `tests/fixtures/ports-bad-name.conf`
+- Create: `tests/fixtures/ports-dup-name.conf`
 
 **Step 1: Write the test fixtures**
 
@@ -298,6 +304,75 @@ setup() {
   run parse_ports /no/such/file.conf
   [ "$status" -ne 0 ]
 }
+
+@test "parse_ports rejects malformed line (return code 3)" {
+  run parse_ports tests/fixtures/ports-malformed.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"malformed"* ]]
+}
+
+@test "parse_ports rejects trailing garbage" {
+  run parse_ports tests/fixtures/ports-trailing-garbage.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"trailing garbage"* ]]
+}
+
+@test "parse_ports allows trailing # comments on data lines" {
+  run parse_ports tests/fixtures/ports-trailing-comment.conf
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "ttyUSB0 STM 115200" ]
+}
+
+@test "parse_ports rejects invalid device name" {
+  run parse_ports tests/fixtures/ports-bad-dev.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid device name"* ]]
+}
+
+@test "parse_ports rejects name with path traversal" {
+  run parse_ports tests/fixtures/ports-bad-name.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid name"* ]]
+}
+
+@test "parse_ports rejects duplicate names (return code 6)" {
+  run parse_ports tests/fixtures/ports-dup-name.conf
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"duplicate name"* ]]
+}
+```
+
+Additional fixtures for the new tests:
+
+`tests/fixtures/ports-malformed.conf`:
+```
+ttyUSB0 STM
+```
+
+`tests/fixtures/ports-trailing-garbage.conf`:
+```
+ttyUSB0 STM 115200 garbage trailing words
+```
+
+`tests/fixtures/ports-trailing-comment.conf`:
+```
+ttyUSB0 STM 115200 # primary device
+```
+
+`tests/fixtures/ports-bad-dev.conf`:
+```
+eth0 STM 115200
+```
+
+`tests/fixtures/ports-bad-name.conf`:
+```
+ttyUSB0 ../etc 115200
+```
+
+`tests/fixtures/ports-dup-name.conf`:
+```
+ttyUSB0 STM 115200
+ttyUSB1 STM 115200
 ```
 
 **Step 3: Run tests — should fail (lib/parse-ports.sh doesn't exist)**
@@ -310,6 +385,7 @@ bats tests/parse-ports.bats
 
 ```bash
 #!/usr/bin/env bash
+# shellcheck shell=bash
 # parse-ports.sh — parse /etc/pi-monitor-light/ports.conf
 # Format per line: <kernel-device> <name> <baud>
 # Lines starting with # are ignored. Blank lines are ignored. Max 4 ports.
@@ -323,28 +399,54 @@ parse_ports() {
   fi
 
   local count=0
-  local dev name baud
+  local seen=''
+  local dev name baud rest
   while read -r dev name baud rest; do
     case $dev in ''|\#*) continue ;; esac
+    case $dev in
+      ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+      *) echo "parse_ports: invalid device name (must be ttyUSB<n> or ttyACM<n>): $dev" >&2
+         return 3 ;;
+    esac
     if [ -z "$name" ] || [ -z "$baud" ]; then
       echo "parse_ports: malformed line: $dev $name $baud" >&2
       return 3
     fi
+    case $name in
+      *[!A-Za-z0-9_-]*|'')
+        echo "parse_ports: invalid name (allowed chars: A-Z a-z 0-9 _ -): $name" >&2
+        return 3 ;;
+    esac
     case $baud in *[!0-9]*)
       echo "parse_ports: invalid baud (not numeric): $baud" >&2
       return 4
     ;; esac
+    case $rest in
+      ''|\#*) ;;
+      *) echo "parse_ports: trailing garbage on line: $dev $name $baud $rest" >&2
+         return 3 ;;
+    esac
     count=$((count + 1))
     if [ "$count" -gt 4 ]; then
       echo "parse_ports: max 4 ports allowed" >&2
       return 5
     fi
+    case " $seen " in
+      *" $name "*)
+        echo "parse_ports: duplicate name: $name" >&2
+        return 6 ;;
+    esac
+    seen="$seen $name"
     echo "$dev $name $baud"
   done < "$file"
 }
 
 # If sourced, expose the function. If executed directly, run on $1.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  if [ $# -lt 1 ]; then
+    echo "Usage: parse-ports.sh <ports.conf>" >&2
+    exit 64
+  fi
   parse_ports "$1"
 fi
 ```
