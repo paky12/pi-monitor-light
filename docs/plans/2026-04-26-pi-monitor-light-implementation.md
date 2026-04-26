@@ -743,10 +743,21 @@ git commit -m "feat: add sl-ports listing wrapper"
   [ "$status" -eq 0 ]
 }
 
-@test "sl-status runs without args" {
+@test "sl-status runs without args and exits 0" {
   run bin/sl-status
-  # Status of non-existent units may be non-zero on dev machine; we only check it doesn't crash
-  [ "$status" -le 4 ]
+  [ "$status" -eq 0 ]
+}
+
+@test "sl-status reports (none active) when no logger units" {
+  run bin/sl-status
+  [[ "$output" == *"(none active)"* ]]
+}
+
+@test "sl-status reports (empty) when log dir exists but empty" {
+  tmp=$(mktemp -d)
+  LOG_DIR=$tmp run bin/sl-status
+  rmdir "$tmp"
+  [[ "$output" == *"(empty)"* ]]
 }
 ```
 
@@ -760,16 +771,26 @@ set -u
 LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
 
 echo '== Logger units =='
-systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' \
-  || echo '  (none active)'
+units=$(systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' 2>/dev/null || true)
+if [ -n "$units" ]; then
+  printf '%s\n' "$units"
+else
+  echo '  (none active)'
+fi
 
 echo
 echo '== Log sizes =='
-if [ -d "$LOG_DIR" ]; then
-  du -sh "$LOG_DIR"/* 2>/dev/null | sort -h \
-    || echo '  (empty)'
-else
+if [ ! -d "$LOG_DIR" ]; then
   echo "  ($LOG_DIR does not exist yet)"
+else
+  shopt -s nullglob
+  files=("$LOG_DIR"/*)
+  shopt -u nullglob
+  if [ ${#files[@]} -gt 0 ]; then
+    du -sh "${files[@]}" 2>/dev/null | sort -h
+  else
+    echo '  (empty)'
+  fi
 fi
 ```
 
