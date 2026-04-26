@@ -14,7 +14,7 @@ EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
 ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
 
-ExecStart=/bin/sh -c '\
+ExecStart=/bin/sh -ec '\
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   echo "$LOG" > /run/pi-monitor/%i.current; \
   echo "============================================================" >> "$LOG"; \
@@ -22,7 +22,7 @@ ExecStart=/bin/sh -c '\
   echo "============================================================" >> "$LOG"; \
   exec /usr/bin/cat /dev/%i | /usr/bin/ts "%%Y-%%m-%%d %%H:%%M:%%.S" | /usr/bin/tee -a "$LOG"'
 
-ExecStopPost=/bin/sh -c '\
+ExecStopPost=/bin/sh -ec '\
   LOG=$(cat /run/pi-monitor/%i.current 2>/dev/null) || exit 0; \
   [ -f "$LOG" ] || exit 0; \
   START=$(stat -c %%Y "$LOG"); \
