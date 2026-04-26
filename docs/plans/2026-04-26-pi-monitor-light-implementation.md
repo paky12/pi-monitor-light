@@ -516,6 +516,12 @@ git commit -m "feat: add ports.conf parser with validation"
   run shellcheck -x bin/sl-monitor
   [ "$status" -eq 0 ]
 }
+
+@test "sl-monitor restart with invalid port name exits 2" {
+  run bin/sl-monitor restart 'foo;bar'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid port"* ]]
+}
 ```
 
 **Step 2: Run tests — should fail**
@@ -526,6 +532,7 @@ git commit -m "feat: add ports.conf parser with validation"
 #!/usr/bin/env bash
 # sl-monitor — start/stop UART logger systemd units based on /etc/pi-monitor-light/ports.conf
 set -eu
+set -o pipefail
 
 CONF=/etc/pi-monitor-light/ports.conf
 ENV_DIR=/etc/pi-monitor-light
@@ -542,18 +549,19 @@ EOF
   exit 2
 }
 
-require_root() {
-  if [ "$(id -u)" -ne 0 ]; then
-    exec sudo --preserve-env=PATH "$0" "$@"
-  fi
-}
-
 write_env_files() {
   # shellcheck source=/dev/null
   . "$LIB"
+  # Pre-check: parse_ports failures inside `< <(...)` process substitution
+  # do not propagate under set -e (subshell). Run once first to abort early
+  # with a clear non-zero exit if the config is invalid.
+  parse_ports "$CONF" >/dev/null
   while read -r dev name baud; do
-    printf 'NAME=%s\nBAUD=%s\n' "$name" "$baud" \
-      > "$ENV_DIR/ports.conf.env-$dev"
+    local tmp="$ENV_DIR/.ports.conf.env-$dev.$$"
+    printf 'NAME=%s\nBAUD=%s\n' "$name" "$baud" > "$tmp"
+    # rename(2) is atomic on the same filesystem — readers see either
+    # the old file or the complete new file, never a torn write.
+    mv -f "$tmp" "$ENV_DIR/ports.conf.env-$dev"
   done < <(parse_ports "$CONF")
 }
 
@@ -563,23 +571,29 @@ active_units() {
 }
 
 cmd_up() {
-  require_root "$@"
   write_env_files
+  # Pre-check: same set -e / process-substitution gotcha as in write_env_files.
+  parse_ports "$CONF" >/dev/null
   while read -r dev _ _; do
     systemctl enable --now "uart-logger@${dev}.service"
   done < <(parse_ports "$CONF")
 }
 
 cmd_down() {
-  require_root "$@"
   for u in $(active_units); do
     systemctl disable --now "$u" || true
   done
 }
 
 cmd_restart() {
-  require_root "$@"
-  if [ "${1:-}" ]; then
+  if [ -n "${1:-}" ]; then
+    # Defensive re-validation — the top-level pre-flight already validated
+    # this for the non-root path, but check again here in case cmd_restart
+    # is ever called from a different code path.
+    case $1 in
+      ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+      *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $1" >&2; exit 2 ;;
+    esac
     systemctl restart "uart-logger@${1}.service"
   else
     for u in $(active_units); do
@@ -589,10 +603,29 @@ cmd_restart() {
 }
 
 case ${1:-} in
+  up|down|restart) ;;
+  *) usage ;;
+esac
+
+# Pre-validate restart's port arg before sudo, so error reporting is clean
+# and the bats tests can exercise this path as a regular user.
+if [ "$1" = "restart" ] && [ -n "${2:-}" ]; then
+  case $2 in
+    ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+    *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $2" >&2; exit 2 ;;
+  esac
+fi
+
+# Privilege escalation must happen before we shift the subcommand off,
+# otherwise sudo re-execs the script with empty argv and falls into usage.
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo --preserve-env=PATH "$0" "$@"
+fi
+
+case $1 in
   up)      shift; cmd_up "$@" ;;
   down)    shift; cmd_down "$@" ;;
   restart) shift; cmd_restart "$@" ;;
-  *)       usage ;;
 esac
 ```
 
