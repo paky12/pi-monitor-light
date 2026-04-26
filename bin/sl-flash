@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# sl-flash — flash an STM32C091 .bin via OpenOCD over ST-Link
+set -eu
+set -o pipefail
+
+FW_DIR=${FW_DIR:-/var/lib/pi-monitor/firmware}
+FW_DIR=${FW_DIR%/}
+OPENOCD=${OPENOCD:-/usr/local/bin/openocd}
+
+usage() {
+  cat >&2 <<EOF
+Usage: sl-flash <binary.bin>
+
+  <binary.bin> must reside under $FW_DIR
+  Drop firmware there with: scp firmware.bin pi-monitor:$FW_DIR/
+EOF
+  exit 2
+}
+
+[ $# -eq 1 ] || usage
+BIN=$1
+
+case $BIN in
+  *.bin) ;;
+  *) echo "sl-flash: not a .bin file: $BIN" >&2; exit 3 ;;
+esac
+
+# Realpath check: refuse anything outside FW_DIR (no path traversal via symlinks).
+ABS=$(readlink -f -- "$BIN") || { echo "sl-flash: cannot resolve $BIN" >&2; exit 3; }
+case $ABS in
+  "$FW_DIR"/*) ;;
+  *) echo "sl-flash: $BIN is not under $FW_DIR" >&2; exit 3 ;;
+esac
+
+# Defense in depth: openocd's -c argument is parsed by Tcl. Reject any path
+# containing whitespace, quotes, or shell/Tcl metachars to prevent argument
+# splitting or command injection inside the program command.
+case $ABS in
+  *[[:space:]]*|*\"*|*\'*|*\$*|*\;*|*\\*|*\{*|*\}*|*\[*|*\]*)
+    echo "sl-flash: path contains unsupported characters: $ABS" >&2
+    exit 3 ;;
+esac
+
+[ -r "$ABS" ] || { echo "sl-flash: cannot read $ABS" >&2; exit 3; }
+
+exec "$OPENOCD" \
+  -f interface/stlink.cfg \
+  -f target/stm32c0x.cfg \
+  -c "program $ABS verify reset exit 0x08000000"
