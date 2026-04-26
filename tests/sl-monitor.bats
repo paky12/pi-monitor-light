@@ -15,3 +15,9 @@
   run shellcheck -x bin/sl-monitor
   [ "$status" -eq 0 ]
 }
+
+@test "sl-monitor restart with invalid port name exits 2" {
+  run bin/sl-monitor restart 'foo;bar'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid port"* ]]
+}
