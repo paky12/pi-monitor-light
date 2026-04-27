@@ -1149,6 +1149,14 @@ git commit -m "feat: add logrotate + boot-overlay fragments"
   run bash -c 'DRY_RUN=1 ./install.sh preflight'
   [ "$status" -eq 0 ]
 }
+
+@test "install.sh DRY_RUN=1 apt-deps lists key build deps" {
+  run bash -c 'DRY_RUN=1 ./install.sh apt-deps'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"libusb-1.0-0-dev"* ]]
+  [[ "$output" == *"libhidapi-dev"* ]]
+  [[ "$output" == *"DEBIAN_FRONTEND=noninteractive"* ]]
+}
 ```
 
 **Step 2: Implement `install.sh` skeleton (preflight + dirs + deps only)**
@@ -1205,22 +1213,32 @@ preflight() {
 install_apt_deps() {
   step 'apt deps'
   run apt-get update
-  run apt-get install -y \
-    tmux moreutils logrotate \
-    libtool autoconf automake pkg-config texinfo \
-    libusb-1.0-0-dev libhidapi-dev \
-    git ca-certificates curl
+  if [ "$DRY_RUN" = "1" ]; then
+    printf '+ DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold tmux moreutils logrotate libtool autoconf automake pkg-config texinfo libusb-1.0-0-dev libhidapi-dev git ca-certificates curl\n'
+  else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      -o Dpkg::Options::=--force-confdef \
+      -o Dpkg::Options::=--force-confold \
+      tmux moreutils logrotate \
+      libtool autoconf automake pkg-config texinfo \
+      libusb-1.0-0-dev libhidapi-dev \
+      git ca-certificates curl
+  fi
 }
 
 create_user_and_dirs() {
   step 'system user + directories'
   if ! id -u "$SVC_USER" >/dev/null 2>&1; then
-    run useradd --system --no-create-home --shell /usr/sbin/nologin \
-                --groups dialout,plugdev "$SVC_USER"
+    run useradd --system --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
   fi
+  # Always ensure required supplementary groups (idempotent — usermod -aG is additive).
+  # Guards against a previous install that created pi-monitor without dialout/plugdev.
+  run usermod -aG dialout,plugdev "$SVC_USER"
   # Add operator (the user that ran sudo) to the pi-monitor group so they can read logs.
   if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" != "1" ]; then
-    usermod -aG "$SVC_USER" "$SUDO_USER" || true
+    if ! usermod -aG "$SVC_USER" "$SUDO_USER"; then
+      echo "warning: failed to add $SUDO_USER to $SVC_USER group; logs may not be readable" >&2
+    fi
   fi
   for d in "$SHARE_DIR" "$ETC_DIR" "$LOG_DIR" "$FW_DIR"; do
     run install -d -m 2775 -o "$SVC_USER" -g "$SVC_USER" "$d"
