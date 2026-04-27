@@ -15,3 +15,11 @@
   run bash -c 'DRY_RUN=1 ./install.sh preflight'
   [ "$status" -eq 0 ]
 }
+
+@test "install.sh DRY_RUN=1 apt-deps lists key build deps" {
+  run bash -c 'DRY_RUN=1 ./install.sh apt-deps'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"libusb-1.0-0-dev"* ]]
+  [[ "$output" == *"libhidapi-dev"* ]]
+  [[ "$output" == *"DEBIAN_FRONTEND=noninteractive"* ]]
+}
