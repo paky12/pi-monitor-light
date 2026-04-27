@@ -44,7 +44,8 @@ run udevadm control --reload-rules
 
 if [ $PURGE -eq 1 ]; then
   echo 'PURGE: removing config, logs, firmware dir, and pi-monitor user'
-  run rm -rf "$ETC_DIR" "$LOG_DIR" "$FW_DIR" /var/lib/pi-monitor
+  # /var/lib/pi-monitor is a superset of $FW_DIR, listing it covers both.
+  run rm -rf "$ETC_DIR" "$LOG_DIR" /var/lib/pi-monitor
   run userdel "$SVC_USER" || true
 else
   echo 'Preserved: '"$ETC_DIR"', '"$LOG_DIR"', '"$FW_DIR"' (use --purge to remove)'
