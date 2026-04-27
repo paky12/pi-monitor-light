@@ -109,7 +109,8 @@ apply_power_tweaks() {
 
   if [ "$DRY_RUN" = "1" ]; then
     echo "+ append boot-overlay/config.txt.fragment to $cfg (if marker absent)"
-    echo "+ append 'maxcpus=2 consoleblank=0' to $cmd (if absent)"
+    echo "+ append '$(cat "$REPO_DIR/boot-overlay/cmdline.txt.fragment")' to $cmd (if maxcpus=2 absent)"
+    echo "+ systemctl disable --now hciuart.service (best-effort)"
     return
   fi
 
