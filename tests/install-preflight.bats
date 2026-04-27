@@ -54,3 +54,16 @@
   [[ "$output" == *"--ssh"* ]]
   [[ "$output" == *"--hostname=pi-monitor"* ]]
 }
+
+@test "install.sh openocd uses GitHub mirror not SourceForge web URL" {
+  run bash -c 'DRY_RUN=1 ./install.sh openocd'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"github.com/openocd-org/openocd"* ]]
+  [[ "$output" != *"sourceforge.net/p/openocd/code"* ]]
+}
+
+@test "install.sh rpi-connect honors INSTALL_RPI_CONNECT in DRY_RUN message" {
+  run bash -c 'DRY_RUN=1 ./install.sh rpi-connect'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INSTALL_RPI_CONNECT"* ]]
+}

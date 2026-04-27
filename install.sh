@@ -132,15 +132,16 @@ apply_power_tweaks() {
 build_openocd() {
   step 'build OpenOCD from master (Bookworm package is too old for STM32C0)'
   if [ -x "$PREFIX/bin/openocd" ] && "$PREFIX/bin/openocd" --version 2>&1 \
-       | grep -qE 'Open On-Chip Debugger 0\.(1[3-9]|[2-9][0-9])'; then
+       | grep -qE 'Open On-Chip Debugger ([1-9][0-9]*\.|0\.(1[3-9]|[2-9][0-9]))'; then
     echo 'openocd already built and recent enough; skipping'
     return
   fi
   local src=$REPO_DIR/openocd-src
   if [ ! -d "$src" ]; then
-    run git clone --depth=1 https://sourceforge.net/p/openocd/code "$src"
+    run git clone --depth=1 https://github.com/openocd-org/openocd.git "$src"
   fi
-  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make -j2 && make install"
+  # shellcheck disable=SC2086  # OPENOCD_JOBS may be empty or contain flags
+  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make ${OPENOCD_JOBS:--j2} && make install"
 }
 
 install_tailscale() {
@@ -156,11 +157,19 @@ install_tailscale() {
 maybe_install_rpi_connect() {
   step 'rpi-connect-lite (optional)'
   if [ "$DRY_RUN" = "1" ]; then
-    echo '+ prompt user; if yes, apt install rpi-connect-lite + enable-linger'
+    echo '+ prompt user (or honor INSTALL_RPI_CONNECT={yes,no}); if yes, apt install rpi-connect-lite + enable-linger'
     return
   fi
-  printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
-  read -r ans
+  local ans
+  case ${INSTALL_RPI_CONNECT:-prompt} in
+    yes) ans=y ;;
+    no)  ans=n ;;
+    prompt)
+      printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
+      read -r ans || ans=n
+      ;;
+    *) echo "INSTALL_RPI_CONNECT must be yes/no/prompt (got: $INSTALL_RPI_CONNECT)" >&2; return 1 ;;
+  esac
   case $ans in
     y|Y|yes|YES)
       apt-get install -y rpi-connect-lite
