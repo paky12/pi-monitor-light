@@ -1383,6 +1383,12 @@ git commit -m "feat: install.sh file install + power tweaks step"
 - Modify: `install.sh`
 - Modify: `tests/install-preflight.bats` (add cases)
 
+**Notes:**
+- OpenOCD is cloned from the official GitHub mirror (`https://github.com/openocd-org/openocd.git`), not the SourceForge web URL — the latter is not a git repo URL and `git clone` would fail. The GitHub mirror is the project's officially-listed source and has better CDN performance on the Pi Zero 2 W's Wi-Fi.
+- The "already built" skip-check regex matches any 1.x+ release OR 0.13–0.99, so a future OpenOCD 1.0 release won't trigger a 30-minute rebuild.
+- `OPENOCD_JOBS` env var lets an operator hitting OOM rerun with `OPENOCD_JOBS=-j1 sudo ./install.sh openocd`. It's expanded by the outer bash before `sh -c`, so the inner shell sees the literal flag. Default is `-j2`.
+- `INSTALL_RPI_CONNECT={yes,no,prompt}` env var enables unattended runs of `./install.sh all`. `read -r ans || ans=n` falls back to "no" on EOF (e.g. stdin redirected from `/dev/null`).
+
 **Step 1: New tests**
 
 ```bash
@@ -1401,6 +1407,19 @@ git commit -m "feat: install.sh file install + power tweaks step"
   [[ "$output" == *"--ssh"* ]]
   [[ "$output" == *"--hostname=pi-monitor"* ]]
 }
+
+@test "install.sh openocd uses GitHub mirror not SourceForge web URL" {
+  run bash -c 'DRY_RUN=1 ./install.sh openocd'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"github.com/openocd-org/openocd"* ]]
+  [[ "$output" != *"sourceforge.net/p/openocd/code"* ]]
+}
+
+@test "install.sh rpi-connect honors INSTALL_RPI_CONNECT in DRY_RUN message" {
+  run bash -c 'DRY_RUN=1 ./install.sh rpi-connect'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INSTALL_RPI_CONNECT"* ]]
+}
 ```
 
 **Step 2: Add the new functions**
@@ -1409,15 +1428,16 @@ git commit -m "feat: install.sh file install + power tweaks step"
 build_openocd() {
   step 'build OpenOCD from master (Bookworm package is too old for STM32C0)'
   if [ -x "$PREFIX/bin/openocd" ] && "$PREFIX/bin/openocd" --version 2>&1 \
-       | grep -qE 'Open On-Chip Debugger 0\.(1[3-9]|[2-9][0-9])'; then
+       | grep -qE 'Open On-Chip Debugger ([1-9][0-9]*\.|0\.(1[3-9]|[2-9][0-9]))'; then
     echo 'openocd already built and recent enough; skipping'
     return
   fi
   local src=$REPO_DIR/openocd-src
   if [ ! -d "$src" ]; then
-    run git clone --depth=1 https://sourceforge.net/p/openocd/code "$src"
+    run git clone --depth=1 https://github.com/openocd-org/openocd.git "$src"
   fi
-  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make -j2 && make install"
+  # shellcheck disable=SC2086  # OPENOCD_JOBS may be empty or contain flags
+  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make ${OPENOCD_JOBS:--j2} && make install"
 }
 
 install_tailscale() {
@@ -1433,11 +1453,19 @@ install_tailscale() {
 maybe_install_rpi_connect() {
   step 'rpi-connect-lite (optional)'
   if [ "$DRY_RUN" = "1" ]; then
-    echo '+ prompt user; if yes, apt install rpi-connect-lite + enable-linger'
+    echo '+ prompt user (or honor INSTALL_RPI_CONNECT={yes,no}); if yes, apt install rpi-connect-lite + enable-linger'
     return
   fi
-  printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
-  read -r ans
+  local ans
+  case ${INSTALL_RPI_CONNECT:-prompt} in
+    yes) ans=y ;;
+    no)  ans=n ;;
+    prompt)
+      printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
+      read -r ans || ans=n
+      ;;
+    *) echo "INSTALL_RPI_CONNECT must be yes/no/prompt (got: $INSTALL_RPI_CONNECT)" >&2; return 1 ;;
+  esac
   case $ans in
     y|Y|yes|YES)
       apt-get install -y rpi-connect-lite

@@ -229,16 +229,17 @@ maxcpus=2 consoleblank=0
 
 > **Important:** Bookworm's `openocd` package is v0.12.0, which does **not** include `target/stm32c0x.cfg`. Verified at [packages.debian.org/bookworm/openocd](https://packages.debian.org/bookworm/openocd) and the [v0.12.0 source tree](https://sourceforge.net/p/openocd/code/ci/v0.12.0/tree/tcl/target/). STM32C0 support exists only on master.
 
-`install.sh` builds OpenOCD from master:
+`install.sh` builds OpenOCD from master (cloned from the official GitHub mirror — the SourceForge `/p/openocd/code` URL is the project web page, not a git repo URL, so `git clone` would fail against it):
 
 ```bash
 sudo apt install -y libtool autoconf automake pkg-config \
                     libusb-1.0-0-dev libhidapi-dev texinfo
-git clone --depth=1 https://sourceforge.net/p/openocd/code openocd-src
+git clone --depth=1 https://github.com/openocd-org/openocd.git openocd-src
 cd openocd-src
 ./bootstrap
 ./configure --enable-stlink --disable-werror
 make -j2                         # ~25–40 min on Pi Zero 2 W with maxcpus=2
+                                 # (override via OPENOCD_JOBS=-j1 if OOM-killed)
 sudo make install                # installs to /usr/local/bin/openocd
 ```
 
