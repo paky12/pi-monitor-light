@@ -38,3 +38,19 @@
   [[ "$output" == *"config.txt"* ]]
   [[ "$output" == *"cmdline.txt"* ]]
 }
+
+@test "install.sh DRY_RUN=1 openocd plans the from-source build" {
+  run bash -c 'DRY_RUN=1 ./install.sh openocd'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"openocd-src"* ]]
+  [[ "$output" == *"./bootstrap"* ]]
+  [[ "$output" == *"--enable-stlink"* ]]
+}
+
+@test "install.sh DRY_RUN=1 tailscale prints install + up command" {
+  run bash -c 'DRY_RUN=1 ./install.sh tailscale'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tailscale.com/install.sh"* ]]
+  [[ "$output" == *"--ssh"* ]]
+  [[ "$output" == *"--hostname=pi-monitor"* ]]
+}

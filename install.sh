@@ -129,21 +129,80 @@ apply_power_tweaks() {
   systemctl disable --now hciuart.service 2>/dev/null || true
 }
 
+build_openocd() {
+  step 'build OpenOCD from master (Bookworm package is too old for STM32C0)'
+  if [ -x "$PREFIX/bin/openocd" ] && "$PREFIX/bin/openocd" --version 2>&1 \
+       | grep -qE 'Open On-Chip Debugger 0\.(1[3-9]|[2-9][0-9])'; then
+    echo 'openocd already built and recent enough; skipping'
+    return
+  fi
+  local src=$REPO_DIR/openocd-src
+  if [ ! -d "$src" ]; then
+    run git clone --depth=1 https://sourceforge.net/p/openocd/code "$src"
+  fi
+  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make -j2 && make install"
+}
+
+install_tailscale() {
+  step 'tailscale'
+  if ! command -v tailscale >/dev/null 2>&1; then
+    run sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'
+  fi
+  echo
+  echo 'Run the following manually to authenticate this Pi (interactive):'
+  echo '  sudo tailscale up --ssh --hostname=pi-monitor'
+}
+
+maybe_install_rpi_connect() {
+  step 'rpi-connect-lite (optional)'
+  if [ "$DRY_RUN" = "1" ]; then
+    echo '+ prompt user; if yes, apt install rpi-connect-lite + enable-linger'
+    return
+  fi
+  printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
+  read -r ans
+  case $ans in
+    y|Y|yes|YES)
+      apt-get install -y rpi-connect-lite
+      if [ -n "${SUDO_USER:-}" ]; then
+        loginctl enable-linger "$SUDO_USER"
+        echo "Run as $SUDO_USER (not root): rpi-connect signin && rpi-connect on"
+      fi
+      ;;
+    *) echo 'skipped' ;;
+  esac
+}
+
 case ${1:-all} in
   preflight)             preflight ;;
   apt-deps)              require_root; install_apt_deps ;;
   user-dirs)             require_root; create_user_and_dirs ;;
   install-files)         require_root; install_files ;;
   power-tweaks)          require_root; apply_power_tweaks ;;
+  openocd)               require_root; build_openocd ;;
+  tailscale)             require_root; install_tailscale ;;
+  rpi-connect)           require_root; maybe_install_rpi_connect ;;
   all)
     preflight
     install_apt_deps
     create_user_and_dirs
     install_files
     apply_power_tweaks
-    echo
-    echo 'install.sh: preflight + deps + dirs + files + power-tweaks done.'
-    echo 'Subsequent steps (openocd build, tailscale) added in later tasks.'
+    build_openocd
+    install_tailscale
+    maybe_install_rpi_connect
+    cat <<'EOF'
+
+============================================================
+install.sh: complete.
+
+Next steps:
+  1. Edit /etc/pi-monitor-light/ports.conf for your wiring.
+  2. Run: sudo sl-monitor up
+  3. Run: sudo tailscale up --ssh --hostname=pi-monitor
+  4. Reboot to apply boot-overlay power tweaks: sudo reboot
+============================================================
+EOF
     ;;
   *) echo "install.sh: unknown step: $1" >&2; exit 2 ;;
 esac
