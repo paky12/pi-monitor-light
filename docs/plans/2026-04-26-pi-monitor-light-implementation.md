@@ -1234,10 +1234,10 @@ create_user_and_dirs() {
   # Always ensure required supplementary groups (idempotent — usermod -aG is additive).
   # Guards against a previous install that created pi-monitor without dialout/plugdev.
   run usermod -aG dialout,plugdev "$SVC_USER"
-  # Add operator (the user that ran sudo) to the pi-monitor group so they can read logs.
+  # Add operator (the user that ran sudo) to pi-monitor (logs) + plugdev (ST-Link) + dialout (UART).
   if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" != "1" ]; then
-    if ! usermod -aG "$SVC_USER" "$SUDO_USER"; then
-      echo "warning: failed to add $SUDO_USER to $SVC_USER group; logs may not be readable" >&2
+    if ! usermod -aG "$SVC_USER",plugdev,dialout "$SUDO_USER"; then
+      echo "warning: failed to add $SUDO_USER to required groups; sl-flash and log access may fail" >&2
     fi
   fi
   for d in "$SHARE_DIR" "$ETC_DIR" "$LOG_DIR" "$FW_DIR"; do
@@ -1438,6 +1438,12 @@ build_openocd() {
   fi
   # shellcheck disable=SC2086  # OPENOCD_JOBS may be empty or contain flags
   run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make ${OPENOCD_JOBS:--j2} && make install"
+  # OpenOCD's `make install` doesn't drop the contrib udev rule; do it ourselves.
+  if [ -f "$src/contrib/60-openocd.rules" ]; then
+    run install -m 0644 "$src/contrib/60-openocd.rules" /etc/udev/rules.d/60-openocd.rules
+    run udevadm control --reload-rules
+    run udevadm trigger
+  fi
 }
 
 install_tailscale() {
@@ -1584,6 +1590,8 @@ run rm -f "$SHARE_DIR/parse-ports.sh"
 run rmdir --ignore-fail-on-non-empty "$SHARE_DIR" 2>/dev/null || true
 run rm -f /etc/systemd/system/uart-logger@.service
 run rm -f /etc/udev/rules.d/99-pi-monitor.rules
+# Note: this rule was installed by openocd's source build; we own it on uninstall.
+run rm -f /etc/udev/rules.d/60-openocd.rules
 run rm -f /etc/logrotate.d/pi-monitor
 run systemctl daemon-reload
 run udevadm control --reload-rules

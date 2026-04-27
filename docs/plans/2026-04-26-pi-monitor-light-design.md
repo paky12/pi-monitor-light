@@ -123,6 +123,7 @@ pi-monitor-light/
 Description=UART logger on /dev/%i
 After=dev-%i.device
 BindsTo=dev-%i.device
+ConditionPathExists=/etc/pi-monitor-light/ports.conf.env-%i
 
 [Service]
 Type=simple
@@ -135,7 +136,7 @@ EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
 ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
 
-ExecStart=/bin/sh -ec '\
+ExecStart=/bin/sh -ec 'set -o pipefail; \
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   echo "$LOG" > /run/pi-monitor/%i.current; \
   echo "============================================================" >> "$LOG"; \

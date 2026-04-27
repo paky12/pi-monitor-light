@@ -15,6 +15,8 @@ On a fresh Raspberry Pi OS Bookworm Lite install:
     sudo tailscale up --ssh --hostname=pi-monitor
     sudo reboot                 # apply boot-overlay tweaks
 
+**Group changes take effect on next login.** The reboot above handles this; if you skip the reboot, run `newgrp pi-monitor` (and similar for `plugdev`, `dialout`) or simply log out and back in before running `sl-flash`.
+
 From your laptop (Tailscale-connected):
 
     ssh patrik@pi-monitor
