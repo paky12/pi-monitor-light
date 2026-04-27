@@ -3,7 +3,6 @@
 # Idempotent: safe to re-run.
 set -euo pipefail
 
-# shellcheck disable=SC2034  # REPO_DIR is consumed by file-install/units in later tasks.
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PREFIX=/usr/local
 SHARE_DIR=$PREFIX/share/pi-monitor-light
@@ -81,17 +80,69 @@ create_user_and_dirs() {
   done
 }
 
+install_files() {
+  step 'install scripts + lib + unit + udev + logrotate'
+  for s in sl-monitor sl-attach sl-flash sl-ports sl-status; do
+    run install -m 0755 "$REPO_DIR/bin/$s" "$PREFIX/bin/$s"
+  done
+  run install -m 0644 "$REPO_DIR/lib/parse-ports.sh" "$SHARE_DIR/parse-ports.sh"
+  run install -m 0644 "$REPO_DIR/systemd/uart-logger@.service" \
+              /etc/systemd/system/uart-logger@.service
+  run install -m 0644 "$REPO_DIR/udev/99-pi-monitor.rules" \
+              /etc/udev/rules.d/99-pi-monitor.rules
+  run install -m 0644 "$REPO_DIR/etc/logrotate.d/pi-monitor" \
+              /etc/logrotate.d/pi-monitor
+
+  if [ ! -f "$ETC_DIR/ports.conf" ]; then
+    run install -m 0644 "$REPO_DIR/etc/ports.conf.example" "$ETC_DIR/ports.conf"
+  fi
+
+  run systemctl daemon-reload
+  run udevadm control --reload-rules
+}
+
+apply_power_tweaks() {
+  step 'power tweaks (/boot/firmware/config.txt + cmdline.txt)'
+  local cfg=/boot/firmware/config.txt
+  local cmd=/boot/firmware/cmdline.txt
+  local marker='# pi-monitor-light power tweaks'
+
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "+ append boot-overlay/config.txt.fragment to $cfg (if marker absent)"
+    echo "+ append 'maxcpus=2 consoleblank=0' to $cmd (if absent)"
+    return
+  fi
+
+  if ! grep -qF "$marker" "$cfg"; then
+    {
+      echo
+      cat "$REPO_DIR/boot-overlay/config.txt.fragment"
+    } >> "$cfg"
+  fi
+
+  if ! grep -q 'maxcpus=2' "$cmd"; then
+    # cmdline.txt MUST stay one line — append, no newline.
+    sed -i "$ s/$/ $(cat "$REPO_DIR/boot-overlay/cmdline.txt.fragment")/" "$cmd"
+  fi
+
+  systemctl disable --now hciuart.service 2>/dev/null || true
+}
+
 case ${1:-all} in
   preflight)             preflight ;;
   apt-deps)              require_root; install_apt_deps ;;
   user-dirs)             require_root; create_user_and_dirs ;;
+  install-files)         require_root; install_files ;;
+  power-tweaks)          require_root; apply_power_tweaks ;;
   all)
     preflight
     install_apt_deps
     create_user_and_dirs
+    install_files
+    apply_power_tweaks
     echo
-    echo 'install.sh: preflight + deps + dirs done.'
-    echo 'Subsequent steps (openocd build, units, tailscale) added in later tasks.'
+    echo 'install.sh: preflight + deps + dirs + files + power-tweaks done.'
+    echo 'Subsequent steps (openocd build, tailscale) added in later tasks.'
     ;;
   *) echo "install.sh: unknown step: $1" >&2; exit 2 ;;
 esac

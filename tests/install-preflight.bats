@@ -23,3 +23,18 @@
   [[ "$output" == *"libhidapi-dev"* ]]
   [[ "$output" == *"DEBIAN_FRONTEND=noninteractive"* ]]
 }
+
+@test "install.sh DRY_RUN=1 install-files prints expected installs" {
+  run bash -c 'DRY_RUN=1 ./install.sh install-files'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sl-monitor"* ]]
+  [[ "$output" == *"uart-logger@.service"* ]]
+  [[ "$output" == *"99-pi-monitor.rules"* ]]
+}
+
+@test "install.sh DRY_RUN=1 power-tweaks prints config.txt edits" {
+  run bash -c 'DRY_RUN=1 ./install.sh power-tweaks'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"config.txt"* ]]
+  [[ "$output" == *"cmdline.txt"* ]]
+}
