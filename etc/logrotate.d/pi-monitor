@@ -1,3 +1,5 @@
+# tee -a in the systemd unit uses O_APPEND, so post-truncate writes resume
+# at offset 0 cleanly — copytruncate is the right rotation strategy here.
 /var/log/pi-monitor/*/*.log {
     weekly
     rotate 8
