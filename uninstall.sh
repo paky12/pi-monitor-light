@@ -38,6 +38,8 @@ run rm -f "$SHARE_DIR/parse-ports.sh"
 run rmdir --ignore-fail-on-non-empty "$SHARE_DIR" 2>/dev/null || true
 run rm -f /etc/systemd/system/uart-logger@.service
 run rm -f /etc/udev/rules.d/99-pi-monitor.rules
+# Note: this rule was installed by openocd's source build; we own it on uninstall.
+run rm -f /etc/udev/rules.d/60-openocd.rules
 run rm -f /etc/logrotate.d/pi-monitor
 run systemctl daemon-reload
 run udevadm control --reload-rules

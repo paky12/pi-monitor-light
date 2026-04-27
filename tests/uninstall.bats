@@ -12,3 +12,7 @@
   [[ "$output" == *"uart-logger@.service"* ]]
   [[ "$output" == *"99-pi-monitor.rules"* ]]
 }
+
+@test "uninstall.sh removes openocd udev rule" {
+  grep -q '60-openocd.rules' uninstall.sh
+}

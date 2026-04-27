@@ -67,3 +67,11 @@
   [ "$status" -eq 0 ]
   [[ "$output" == *"INSTALL_RPI_CONNECT"* ]]
 }
+
+@test "install.sh adds operator to plugdev and dialout groups" {
+  grep -q 'usermod -aG.*plugdev.*dialout' install.sh
+}
+
+@test "install.sh installs openocd udev rule from contrib" {
+  grep -q '60-openocd.rules' install.sh
+}
