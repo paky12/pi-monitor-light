@@ -116,3 +116,7 @@ Check `lsusb` for the ST-Link entry. The pi-monitor user needs `plugdev` group a
 
     sudo ./uninstall.sh            # keep logs + config
     sudo ./uninstall.sh --purge    # remove everything
+
+---
+
+Author: Patrik Drazic — [github.com/paky12](https://github.com/paky12)

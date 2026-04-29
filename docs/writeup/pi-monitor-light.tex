@@ -106,7 +106,9 @@
 \title{\vspace{-1.4cm}
   {\sffamily\bfseries\color{accent}\Large pi-monitor-light}\\[2pt]
   {\sffamily\large A power-budgeted, SSH-only UART monitor and STM32 flashing station}}
-\author{\sffamily\normalsize Patrik Drazic\\[-1pt]\small\textit{Technical Note}}
+\author{\sffamily\normalsize Patrik Drazic\\[1pt]
+        \small\href{https://github.com/paky12}{\nolinkurl{github.com/paky12}}\\[2pt]
+        \small\textit{Technical Note}}
 \date{\sffamily\small April 2026}
 
 % ---------- abstract box ----------
@@ -526,6 +528,20 @@ debt: when upstream cuts a 0.13.x release with stable STM32C0
 support, the installer should switch to the apt-installed package and
 delete the from-source build path. The skip-check regex already
 accommodates the version transition.
+
+% =============================================================
+\section*{Repository \& author}
+% =============================================================
+
+Source, design document, implementation plan, and operator README live
+in the project repository under \texttt{pi-monitor-light/}. The design
+document under \texttt{docs/plans/} contains the verified citations
+for every systemd directive, Pi boot config option, and external
+service decision used in this writeup.
+
+\smallskip\noindent
+Author: Patrik Drazic ---
+\href{https://github.com/paky12}{\nolinkurl{github.com/paky12}}
 
 % =============================================================
 \begin{thebibliography}{9}\small
