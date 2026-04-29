@@ -181,61 +181,71 @@ on the tty device, piped through \texttt{ts} for timestamping and
 \centering
 \begin{tikzpicture}[
   font=\sffamily\footnotesize,
-  node distance=10pt,
   >={Stealth[length=4pt]},
   every node/.style={align=center},
   box/.style={draw=accent,thick,rounded corners=2pt,minimum height=18pt,
               minimum width=22mm,fill=accent!4,inner sep=4pt},
   cloud/.style={draw=accent,thick,rounded corners=8pt,fill=accent!8,
-              inner sep=4pt,minimum height=18pt,minimum width=28mm},
+              inner sep=4pt,minimum height=18pt,minimum width=32mm},
   hub/.style={draw=accent,thick,rounded corners=2pt,minimum height=18pt,
-              fill=accent!8,inner sep=3pt},
-  pi/.style={draw=accent,thick,rounded corners=4pt,fill=white,inner sep=6pt,
-             minimum width=70mm},
-  sub/.style={draw=accent!50,thin,rounded corners=2pt,fill=accent!4,
-              minimum height=14pt,inner sep=2pt,font=\sffamily\scriptsize},
+              fill=accent!8,inner sep=3pt,minimum width=34mm},
+  pi/.style={draw=accent,very thick,rounded corners=4pt},
+  sub/.style={draw=accent!55,thin,rounded corners=2pt,fill=accent!6,
+              minimum height=16pt,inner sep=3pt,minimum width=36mm,
+              font=\sffamily\scriptsize},
+  subwide/.style={sub,minimum width=76mm,minimum height=14pt},
   device/.style={draw=accent!70,thick,rounded corners=2pt,
-              fill=white,minimum width=18mm,minimum height=14pt,
+              fill=white,minimum width=20mm,minimum height=14pt,
               inner sep=2pt,font=\sffamily\scriptsize},
 ]
 
 % --- top row: laptop, cloud
 \node[box] (laptop) {Operator laptop};
-\node[cloud,right=18mm of laptop] (ts) {Tailscale tailnet\\\scriptsize(MagicDNS, NAT-traversing)};
+\node[cloud,right=20mm of laptop] (ts)
+   {Tailscale tailnet\\\scriptsize(MagicDNS, NAT-traversing)};
 
-% --- pi block
-\node[pi,below=14mm of ts] (pi) {};
-\node[anchor=north] at (pi.north) {\textbf{Raspberry Pi Zero 2 W}};
-\node[sub,below=10pt of pi.north,text width=32mm] (svc1)
-   {\texttt{tailscaled} \,+\, \texttt{sshd}};
-\node[sub,right=4pt of svc1,text width=32mm] (svc2)
-   {\texttt{sl-*} CLI wrappers};
-\node[sub,below=2pt of svc1,text width=32mm] (sys1)
-   {\texttt{udev} rule\\\texttt{99-pi-monitor.rules}};
-\node[sub,right=4pt of sys1,text width=32mm] (sys2)
-   {\texttt{uart-logger@.service}\\(systemd template)};
-\node[sub,below=2pt of sys1,text width=68mm,minimum height=11pt] (data)
-   {\texttt{cat /dev/ttyXXX | ts | tee /var/log/pi-monitor/<n>/<ts>.log}};
+% --- Pi internals: 2x2 grid + wide data row, drawn FIRST,
+%     then a fit container is wrapped around them.
+\node[sub,below=24mm of ts,xshift=-20mm]
+     (svc1) {\texttt{tailscaled} + \texttt{sshd}};
+\node[sub,right=4mm of svc1]
+     (svc2) {\texttt{sl-*} CLI wrappers};
+\node[sub,below=3mm of svc1.south west,anchor=north west]
+     (sys1) {udev: \texttt{99-pi-monitor.rules}};
+\node[sub,right=4mm of sys1]
+     (sys2) {\texttt{uart-logger@.service}};
+\coordinate (gridmid) at ($(sys1.south)!0.5!(sys2.south)$);
+\node[subwide,below=3mm of gridmid,anchor=north]
+     (data) {\texttt{cat /dev/ttyXXX | ts | tee \$LOG}};
 
-% --- USB hub
-\node[hub,below=14mm of pi] (hub) {Powered USB hub};
+% Title above the grid (will be enclosed by the fit container)
+\node[font=\sffamily\small\bfseries\color{accent},
+      above=3mm of svc1.north west,anchor=south west]
+     (pititle) {Raspberry Pi Zero 2 W};
+
+% Container wraps the title + all internals
+\node[pi,fit=(pititle)(svc1)(svc2)(sys1)(sys2)(data),inner sep=5pt] (pi) {};
+
+% --- USB hub well below pi
+\node[hub,below=12mm of pi.south] (hub) {Powered USB hub};
 
 % --- target row
-\node[device,below=12mm of hub.south,xshift=-26mm] (stl)  {ST-Link V2};
-\node[device,right=6mm of stl] (ftdi1) {FTDI 1};
-\node[device,right=6mm of ftdi1] (ftdi2) {FTDI 2};
-\node[device,below=10pt of stl] (stm) {STM32C091};
-\node[device,below=10pt of ftdi1] (mcu1) {STM UART};
-\node[device,below=10pt of ftdi2] (mcu2) {ESP UART};
+\node[device,below=14mm of hub.south,xshift=-32mm] (stl)   {ST-Link V2};
+\node[device,right=8mm of stl]                       (ftdi1) {FTDI 1};
+\node[device,right=8mm of ftdi1]                     (ftdi2) {FTDI 2};
+\node[device,below=10pt of stl]                      (stm)   {STM32C091};
+\node[device,below=10pt of ftdi1]                    (mcu1)  {STM UART};
+\node[device,below=10pt of ftdi2]                    (mcu2)  {ESP UART};
 
 % --- arrows
 \draw[->,thick,accent] (laptop) -- node[above,font=\scriptsize]{ssh} (ts);
-\draw[->,thick,accent] (ts) -- node[right,font=\scriptsize]{Wi-Fi} (pi.north -| ts);
-\draw[->,thick,accent] (pi.south) -- node[right,font=\scriptsize]{USB} (hub);
-\draw[->,thick,accent!70] (hub.south) -- ($(stl.north)+(0,2pt)$);
-\draw[->,thick,accent!70] (hub.south) -- ($(ftdi1.north)+(0,2pt)$);
-\draw[->,thick,accent!70] (hub.south) -- ($(ftdi2.north)+(0,2pt)$);
-\draw[->,thick,accent!50,dashed] (stl) -- node[right,font=\scriptsize]{SWD} (stm);
+\draw[->,thick,accent] (ts.south) -- node[right,font=\scriptsize]{Wi-Fi}
+       (pi.north -| ts.south);
+\draw[->,thick,accent] (pi.south) -- node[right,font=\scriptsize]{USB} (hub.north);
+\draw[->,thick,accent!70] (hub.south) -- (stl.north);
+\draw[->,thick,accent!70] (hub.south) -- (ftdi1.north);
+\draw[->,thick,accent!70] (hub.south) -- (ftdi2.north);
+\draw[->,thick,accent!50,dashed] (stl)   -- node[right,font=\scriptsize]{SWD}  (stm);
 \draw[->,thick,accent!50,dashed] (ftdi1) -- node[right,font=\scriptsize]{UART} (mcu1);
 \draw[->,thick,accent!50,dashed] (ftdi2) -- node[right,font=\scriptsize]{UART} (mcu2);
 
