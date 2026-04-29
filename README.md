@@ -3,6 +3,32 @@
 SSH-only UART monitor + STM32C091 flashing station for Raspberry Pi Zero 2 W.
 Power-budgeted for ≤2.3 W. Replaces the FastAPI-based `pi-monitor` for the Zero 2 W deployment.
 
+## Network bootstrap (WiFi)
+
+The Pi runs headless and is reached over SSH via Tailscale. That requires it to be on the internet first — which is the chicken-and-egg when the Pi travels to sites with different WiFi each time.
+
+**Recommended pattern: phone hotspot as a stable bootstrap.**
+
+1. Configure your phone's hotspot with a fixed SSID + password (e.g. `patrik-bootstrap`). Use the same credentials forever — it becomes your "always-known" network.
+2. On the very first Pi setup, pre-configure that SSID via the Raspberry Pi Imager's "Edit settings" step before flashing the SD card. Pi joins your hotspot on first boot.
+3. SSH in (over Tailscale once it's installed; over LAN until then), and from then on whenever you need to onboard a new site:
+
+       sudo nmcli device wifi connect "SiteWiFi" password "sitepass"
+
+   The credentials persist across reboots. Future visits to the same site auto-connect with no phone needed.
+
+**Useful `nmcli` commands** (Bookworm Lite uses NetworkManager by default):
+
+| Command | What it does |
+|---|---|
+| `nmcli connection show` | List known networks |
+| `sudo nmcli device wifi list` | Scan for nearby networks |
+| `sudo nmcli device wifi connect "<SSID>" password "<pass>"` | Add + auto-connect |
+| `sudo nmcli connection delete "<SSID>"` | Forget a network |
+| `sudo nmcli connection modify "<SSID>" connection.autoconnect-priority 100` | Prefer this network when multiple are in range |
+
+If you need fully zero-laptop-prep recovery (e.g. phone is dead, no known WiFi in range), install [`comitup`](https://davesteele.github.io/comitup/) — it makes the Pi spin up its own AP as a fallback so you can configure WiFi from any laptop's browser.
+
 ## Quick start
 
 On a fresh Raspberry Pi OS Bookworm Lite install:
