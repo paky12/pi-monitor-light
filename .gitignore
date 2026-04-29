@@ -4,3 +4,14 @@
 /openocd-src/
 /build/
 .DS_Store
+
+# LaTeX build artifacts (.tex source and committed .pdf are tracked)
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
