@@ -134,7 +134,8 @@ From any laptop logged into the same Tailscale account:
 
 | Command | What it does |
 |---|---|
-| `sl-attach` | tmux session with one window per active port, live `journalctl -f` |
+| `sl-attach` | All ports in one tmux session (one window per port, live `journalctl -f`) |
+| `sl-attach <name\|device>` | Live-tail one port (no tmux). Run in separate terminal tabs for side-by-side viewing |
 | `sl-status` | Running loggers + log directory sizes |
 | `sl-ports` | Configured ports vs. kernel-detected USB devices |
 | `sl-monitor up\|down\|restart [port]` | Start/stop/restart loggers (per port or all) |
@@ -152,11 +153,20 @@ From any laptop logged into the same Tailscale account:
        ssh patrik@pi-monitor
        sl-flash /var/lib/pi-monitor/firmware/firmware.bin
 
-4. Watch the live UART output:
+4. Watch the live UART output. Two styles, pick whichever you like:
+
+   **All ports in one tmux** (the default):
 
        sl-attach
 
-   Switch tmux windows with `Ctrl-b n` / `Ctrl-b p`. Detach (loggers keep running) with `Ctrl-b d`. Re-attach by running `sl-attach` again.
+   Switch windows with `Ctrl-b n` / `Ctrl-b p` (press the prefix, release, then the next key — they're separate keystrokes). Detach (loggers keep running) with `Ctrl-b d`. Re-attach by running `sl-attach` again.
+
+   **One port per terminal tab** (no tmux):
+
+       sl-attach STM      # in laptop tab 1
+       sl-attach EL       # in laptop tab 2
+
+   Use the `name` from `ports.conf` (or the kernel device, e.g. `ttyUSB0`). Each invocation just runs `journalctl -f` for that one unit; arrange the tabs in your laptop's terminal app for side-by-side viewing.
 
 5. Session logs persist under `/var/log/pi-monitor/<name>/` and rotate via logrotate, so you can `grep` history later.
 

@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# sl-attach — open or attach a tmux session with one window per active logger
+# sl-attach — open a tmux session with all logger windows, OR live-tail a single port
 set -euo pipefail
 
 SESSION=${SESSION:-pi-monitor}
+CONF=${CONF:-/etc/pi-monitor-light/ports.conf}
+LIB=${LIB:-/usr/local/share/pi-monitor-light/parse-ports.sh}
 
 usage() {
   cat <<EOF
-Usage: sl-attach
-
-Opens (or attaches to) tmux session "$SESSION" with one window per
-active uart-logger@* unit, each running journalctl -f for that unit.
-
+Usage:
+  sl-attach                  Open/attach tmux session "$SESSION" with one
+                             window per active uart-logger@* unit.
+  sl-attach <name|device>    Live-tail a single port (no tmux). Run in
+                             separate terminal tabs for side-by-side viewing.
+                             <name>   matches the second column of ports.conf
+                                      (e.g. STM, EL).
+                             <device> e.g. ttyUSB0, ttyACM1.
+                             Ctrl-C to exit.
 EOF
 }
 
@@ -18,6 +24,42 @@ case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
 
+resolve_port() {
+  # Accept either a kernel device or a friendly name from ports.conf;
+  # echo the kernel device on stdout.
+  local arg=$1
+  case $arg in
+    ttyUSB[0-9]*|ttyACM[0-9]*) printf '%s\n' "$arg"; return 0 ;;
+  esac
+  if [ ! -f "$CONF" ]; then
+    echo "sl-attach: $CONF not found; cannot resolve name '$arg'" >&2
+    return 2
+  fi
+  if [ ! -f "$LIB" ]; then
+    echo "sl-attach: parser library missing: $LIB" >&2
+    return 2
+  fi
+  # shellcheck source=/dev/null
+  . "$LIB"
+  local dev name baud
+  while read -r dev name baud; do
+    if [ "$name" = "$arg" ]; then
+      printf '%s\n' "$dev"
+      return 0
+    fi
+  done < <(parse_ports "$CONF")
+  echo "sl-attach: no port named '$arg' in $CONF" >&2
+  echo "          (tip: 'sl-ports' shows configured names)" >&2
+  return 1
+}
+
+# Single-port mode — exec journalctl, no tmux.
+if [ $# -ge 1 ] && [ -n "$1" ]; then
+  dev=$(resolve_port "$1")
+  exec journalctl -fu "uart-logger@${dev}.service" -o cat
+fi
+
+# Multi-port (tmux) mode.
 active_ports() {
   systemctl list-units --no-legend --type=service 'uart-logger@*' \
     | awk '{print $1}' \
