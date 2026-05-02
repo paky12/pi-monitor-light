@@ -284,10 +284,6 @@ The boot overlay sets `maxcpus=2` — a power-budgeting tweak that's correct for
 
 ---
 
-# Optional: laptop-side GUI
-
-A NiceGUI control panel for driving the tool from your laptop instead of the CLI lives in [`gui/`](gui/). It SSHes into the Pi to drive the same `sl-*` commands and streams `journalctl -fu` per port into side-by-side log panes — buttons for flash / restart / wipe, drag-and-drop firmware upload, status indicators. **Pi side stays unchanged.** See [`gui/README.md`](gui/README.md) for setup.
-
 # Uninstall
 
     sudo ./uninstall.sh            # keep logs + config
