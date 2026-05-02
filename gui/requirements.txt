@@ -1,0 +1,3 @@
+nicegui>=1.4
+# Optional: for `--native` mode (PyWebview desktop window instead of a browser tab)
+# pywebview>=4.0
