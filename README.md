@@ -36,6 +36,12 @@ Insert the SD card, power on the Pi, and wait 1–2 minutes for it to join WiFi.
 
 If `pi-monitor.local` doesn't resolve, find the IP from your router and use that.
 
+Once on, bring the system up to date before installing anything else — Bookworm Lite ships with package versions from the SD-card image, which can be months behind:
+
+    sudo apt-get update && sudo apt-get upgrade -y
+
+Reboot if the upgrade pulled in a new kernel: `sudo reboot`.
+
 ## 3. Clone & install
 
     git clone https://github.com/paky12/pi-monitor-light.git ~/pi-monitor-light
