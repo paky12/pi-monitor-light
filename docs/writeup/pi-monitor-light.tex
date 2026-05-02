@@ -358,7 +358,7 @@ ConditionPathExists=/etc/pi-monitor-light/ports.conf.env-%i
 User=pi-monitor
 EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} raw -echo -crtscts
-ExecStart=/bin/sh -ec 'set -o pipefail; \
+ExecStart=/bin/bash -ec 'set -o pipefail; \
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   exec /usr/bin/cat /dev/%i | /usr/bin/ts | /usr/bin/tee -a "$LOG"'
 Restart=on-failure

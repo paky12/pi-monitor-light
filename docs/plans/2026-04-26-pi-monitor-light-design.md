@@ -136,7 +136,7 @@ EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
 ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
 
-ExecStart=/bin/sh -ec 'set -o pipefail; \
+ExecStart=/bin/bash -ec 'set -o pipefail; \
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   echo "$LOG" > /run/pi-monitor/%i.current; \
   echo "============================================================" >> "$LOG"; \
@@ -209,7 +209,6 @@ SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", ACTION=="add", \
 # pi-monitor-light power tweaks
 dtoverlay=disable-bt           # disable Bluetooth controller
 dtparam=act_led_trigger=none   # turn off the green ACT LED at idle
-dtparam=act_led_activelow=off
 disable_splash=1               # skip rainbow boot splash
 ```
 
@@ -226,17 +225,20 @@ maxcpus=2 consoleblank=0
 
 `install.sh` should also `systemctl disable hciuart.service` (the `disable-bt` overlay restores UART0 but doesn't stop the bluetooth service from trying to attach).
 
-## 9. OpenOCD (built from master)
+## 9. OpenOCD (built from a pinned master commit)
 
-> **Important:** Bookworm's `openocd` package is v0.12.0, which does **not** include `target/stm32c0x.cfg`. Verified at [packages.debian.org/bookworm/openocd](https://packages.debian.org/bookworm/openocd) and the [v0.12.0 source tree](https://sourceforge.net/p/openocd/code/ci/v0.12.0/tree/tcl/target/). STM32C0 support exists only on master.
+> **Important:** Bookworm's `openocd` package is v0.12.0, which does **not** include `target/stm32c0x.cfg`. Verified at [packages.debian.org/bookworm/openocd](https://packages.debian.org/bookworm/openocd) and the [v0.12.0 source tree](https://sourceforge.net/p/openocd/code/ci/v0.12.0/tree/tcl/target/). STM32C0 support exists only on master, and no released tag has shipped it yet.
 
-`install.sh` builds OpenOCD from master (cloned from the official GitHub mirror — the SourceForge `/p/openocd/code` URL is the project web page, not a git repo URL, so `git clone` would fail against it):
+`install.sh` builds OpenOCD from a **pinned commit** on master (the SourceForge `/p/openocd/code` URL is the project web page, not a git repo URL, so `git clone` would fail against it). Pinning makes builds reproducible — bump the SHA when a tagged release ships `tcl/target/stm32c0x.cfg`. `libjim-dev` satisfies OpenOCD's `pkg-config` check for jimtcl ≥ 0.79; OpenOCD's `configure.ac` deprecates the bundled `--enable-internal-jimtcl` path.
 
 ```bash
 sudo apt install -y libtool autoconf automake pkg-config \
-                    libusb-1.0-0-dev libhidapi-dev texinfo
-git clone --depth=1 https://github.com/openocd-org/openocd.git openocd-src
+                    libusb-1.0-0-dev libhidapi-dev libjim-dev texinfo
+OPENOCD_REV=4e9b167e1ae5ccb437eb0538440988b3f0ec53cb   # master @ 2025-11-04
+git clone https://github.com/openocd-org/openocd.git openocd-src
 cd openocd-src
+git fetch origin "$OPENOCD_REV"
+git checkout --detach "$OPENOCD_REV"
 ./bootstrap
 ./configure --enable-stlink --disable-werror
 make -j2                         # ~25–40 min on Pi Zero 2 W with maxcpus=2
@@ -256,12 +258,19 @@ openocd -f interface/stlink.cfg -f target/stm32c0x.cfg \
 
 ### Tailscale (primary)
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
+# Signed apt repo — replaces the older `curl … | sh` install script for ongoing
+# update-integrity. Codename is bookworm or trixie (matches preflight check).
+codename=$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")
+curl -fsSL "https://pkgs.tailscale.com/stable/debian/${codename}.noarmor.gpg" \
+     -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+curl -fsSL "https://pkgs.tailscale.com/stable/debian/${codename}.tailscale-keyring.list" \
+     -o /etc/apt/sources.list.d/tailscale.list
+sudo apt-get update && sudo apt-get install -y tailscale
 sudo tailscale up --ssh --hostname=pi-monitor
 ```
 
 `--ssh` enables Tailscale SSH (auth via tailnet identity, no per-host key management).
-After auth, the Pi is reachable from any device on the tailnet as `ssh patrik@pi-monitor`.
+After auth, the Pi is reachable from any device on the tailnet as `ssh patrik@pi-monitor`. With a customised tailnet ACL, an explicit `ssh` rule block in the [admin console](https://login.tailscale.com/admin/acls) is required.
 
 > Verified at [Tailscale SSH docs](https://tailscale.com/kb/1193/tailscale-ssh) and [tailscale up flags](https://tailscale.com/kb/1241/tailscale-up). On Linux, `--accept-routes` defaults to false (we leave it default).
 
