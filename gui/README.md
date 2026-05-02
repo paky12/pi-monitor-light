@@ -1,8 +1,10 @@
 # pi-monitor-gui
 
-Laptop-side control panel for `pi-monitor-light`. Built with [NiceGUI](https://nicegui.io/).
+Laptop-side control panel for [`pi-monitor-light`](../README.md). Built with [NiceGUI](https://nicegui.io/).
 
-The GUI talks to the Pi over SSH only. **Nothing on the Pi changes.** All it does is wrap the existing `sl-*` commands and stream `journalctl -fu uart-logger@*` per port.
+Drives the existing `sl-*` commands over SSH and streams `journalctl -fu uart-logger@*` per port into side-by-side log panes. Buttons for flash / restart / wipe, drag-and-drop firmware upload, live status indicators per port and per connection. **The Pi side stays unchanged** — this GUI is purely a laptop-side wrapper using normal SSH. Nothing new gets installed on the Pi.
+
+It exists because terminal tabs + tmux + four `sl-*` commands work fine for ad-hoc use, but become awkward when you're cycling DUT firmware all day or supervising a multi-day soak run. A point-and-click panel with always-visible status indicators and one-click actions is just nicer for that workflow.
 
 ```
 ┌── pi-monitor · dev@pi-monitor ─────── ● connection ──┐
