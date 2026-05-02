@@ -50,14 +50,14 @@ install_apt_deps() {
   step 'apt deps'
   run apt-get update
   if [ "$DRY_RUN" = "1" ]; then
-    printf '+ DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold tmux moreutils logrotate libtool autoconf automake pkg-config texinfo libusb-1.0-0-dev libhidapi-dev git ca-certificates curl\n'
+    printf '+ DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold tmux moreutils logrotate libtool autoconf automake pkg-config texinfo libusb-1.0-0-dev libhidapi-dev libjim-dev git ca-certificates curl\n'
   else
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
       -o Dpkg::Options::=--force-confdef \
       -o Dpkg::Options::=--force-confold \
       tmux moreutils logrotate \
       libtool autoconf automake pkg-config texinfo \
-      libusb-1.0-0-dev libhidapi-dev \
+      libusb-1.0-0-dev libhidapi-dev libjim-dev \
       git ca-certificates curl
   fi
 }

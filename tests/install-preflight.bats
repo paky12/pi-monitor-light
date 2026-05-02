@@ -21,6 +21,7 @@
   [ "$status" -eq 0 ]
   [[ "$output" == *"libusb-1.0-0-dev"* ]]
   [[ "$output" == *"libhidapi-dev"* ]]
+  [[ "$output" == *"libjim-dev"* ]]
   [[ "$output" == *"DEBIAN_FRONTEND=noninteractive"* ]]
 }
 
