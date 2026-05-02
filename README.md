@@ -43,6 +43,8 @@ On a fresh Raspberry Pi OS Bookworm Lite install:
 
 **Group changes take effect on next login.** The reboot above handles this; if you skip the reboot, run `newgrp pi-monitor` (and similar for `plugdev`, `dialout`) or simply log out and back in before running `sl-flash`.
 
+**Tailscale SSH note.** `--ssh` works out of the box on a tailnet with the default ACL — you can `ssh patrik@pi-monitor` from any device on your tailnet without managing SSH keys. If you've customised your tailnet's ACL (added tags, user groups, sharing, etc.), Tailscale SSH stops working until you add an explicit `ssh` rule block in the [admin console](https://login.tailscale.com/admin/acls).
+
 From your laptop (Tailscale-connected):
 
     ssh patrik@pi-monitor

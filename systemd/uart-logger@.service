@@ -15,7 +15,7 @@ EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
 ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
 
-ExecStart=/bin/sh -ec 'set -o pipefail; \
+ExecStart=/bin/bash -ec 'set -o pipefail; \
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   echo "$LOG" > /run/pi-monitor/%i.current; \
   echo "============================================================" >> "$LOG"; \
@@ -44,6 +44,23 @@ ProtectHome=yes
 ReadWritePaths=/var/log/pi-monitor /run/pi-monitor
 PrivateTmp=yes
 NoNewPrivileges=yes
+
+# Defence-in-depth — service is a pure cat→ts→tee pipeline as a non-root user.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
 
 StandardOutput=journal
 StandardError=journal

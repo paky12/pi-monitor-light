@@ -67,6 +67,11 @@ create_user_and_dirs() {
   if ! id -u "$SVC_USER" >/dev/null 2>&1; then
     run useradd --system --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
   fi
+  # Trixie dropped the default `plugdev` group; create it ourselves so the
+  # contrib OpenOCD udev rule (GROUP="plugdev") still grants ST-Link access.
+  if ! getent group plugdev >/dev/null 2>&1; then
+    run groupadd -r plugdev
+  fi
   # Always ensure required supplementary groups (idempotent — usermod -aG is additive).
   run usermod -aG dialout,plugdev "$SVC_USER"
   # Add operator (the user that ran sudo) to pi-monitor (logs) + plugdev (ST-Link) + dialout (UART).
@@ -130,7 +135,11 @@ apply_power_tweaks() {
 }
 
 build_openocd() {
-  step 'build OpenOCD from master (Bookworm package is too old for STM32C0)'
+  step 'build OpenOCD from pinned commit (no released tag has STM32C0 support yet)'
+  # Pinned to openocd-org/openocd master @ 2025-11-04. STM32C0 target landed
+  # post-v0.12.0 (the latest tag), so building from a tag is not an option.
+  # Bump this SHA when a tagged release ships tcl/target/stm32c0x.cfg.
+  local OPENOCD_REV=4e9b167e1ae5ccb437eb0538440988b3f0ec53cb
   if [ -x "$PREFIX/bin/openocd" ] && "$PREFIX/bin/openocd" --version 2>&1 \
        | grep -qE 'Open On-Chip Debugger ([1-9][0-9]*\.|0\.(1[3-9]|[2-9][0-9]))'; then
     echo 'openocd already built and recent enough; skipping'
@@ -138,8 +147,10 @@ build_openocd() {
   fi
   local src=$REPO_DIR/openocd-src
   if [ ! -d "$src" ]; then
-    run git clone --depth=1 https://github.com/openocd-org/openocd.git "$src"
+    run git clone https://github.com/openocd-org/openocd.git "$src"
   fi
+  run git -C "$src" fetch origin "$OPENOCD_REV"
+  run git -C "$src" checkout --detach "$OPENOCD_REV"
   # shellcheck disable=SC2086  # OPENOCD_JOBS may be empty or contain flags
   run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make ${OPENOCD_JOBS:--j2} && make install"
   # OpenOCD's `make install` doesn't drop the contrib udev rule; do it ourselves.
@@ -151,9 +162,24 @@ build_openocd() {
 }
 
 install_tailscale() {
-  step 'tailscale'
+  step 'tailscale (signed apt repo)'
   if ! command -v tailscale >/dev/null 2>&1; then
-    run sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'
+    # Re-source /etc/os-release here — preflight() sourced it inside its own
+    # function scope, so VERSION_CODENAME isn't visible from here.
+    local codename=
+    if [ -f /etc/os-release ]; then
+      codename=$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")
+    fi
+    case $codename in
+      bookworm|trixie) ;;
+      *) echo "tailscale: unsupported codename '$codename'; preflight should have caught this" >&2; return 1 ;;
+    esac
+    run sh -c "curl -fsSL https://pkgs.tailscale.com/stable/debian/${codename}.noarmor.gpg \
+                 -o /usr/share/keyrings/tailscale-archive-keyring.gpg"
+    run sh -c "curl -fsSL https://pkgs.tailscale.com/stable/debian/${codename}.tailscale-keyring.list \
+                 -o /etc/apt/sources.list.d/tailscale.list"
+    run apt-get update
+    run apt-get install -y tailscale
   fi
   echo
   echo 'Run the following manually to authenticate this Pi (interactive):'

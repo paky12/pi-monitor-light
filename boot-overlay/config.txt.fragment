@@ -1,5 +1,4 @@
 # pi-monitor-light power tweaks (appended by install.sh)
 dtoverlay=disable-bt
 dtparam=act_led_trigger=none
-dtparam=act_led_activelow=off
 disable_splash=1
