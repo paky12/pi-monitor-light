@@ -123,6 +123,7 @@ pi-monitor-light/
 Description=UART logger on /dev/%i
 After=dev-%i.device
 BindsTo=dev-%i.device
+ConditionPathExists=/etc/pi-monitor-light/ports.conf.env-%i
 
 [Service]
 Type=simple
@@ -135,7 +136,7 @@ EnvironmentFile=/etc/pi-monitor-light/ports.conf.env-%i
 ExecStartPre=/usr/bin/stty -F /dev/%i ${BAUD} cs8 -cstopb -parenb -crtscts -ixon -ixoff raw -echo
 ExecStartPre=/bin/mkdir -p /var/log/pi-monitor/${NAME}
 
-ExecStart=/bin/sh -c '\
+ExecStart=/bin/sh -ec 'set -o pipefail; \
   LOG="/var/log/pi-monitor/${NAME}/$(date +%%Y-%%m-%%d_%%H-%%M-%%S).log"; \
   echo "$LOG" > /run/pi-monitor/%i.current; \
   echo "============================================================" >> "$LOG"; \
@@ -143,7 +144,7 @@ ExecStart=/bin/sh -c '\
   echo "============================================================" >> "$LOG"; \
   exec /usr/bin/cat /dev/%i | /usr/bin/ts "%%Y-%%m-%%d %%H:%%M:%%.S" | /usr/bin/tee -a "$LOG"'
 
-ExecStopPost=/bin/sh -c '\
+ExecStopPost=/bin/sh -ec '\
   LOG=$(cat /run/pi-monitor/%i.current 2>/dev/null) || exit 0; \
   [ -f "$LOG" ] || exit 0; \
   START=$(stat -c %%Y "$LOG"); \
@@ -229,16 +230,17 @@ maxcpus=2 consoleblank=0
 
 > **Important:** Bookworm's `openocd` package is v0.12.0, which does **not** include `target/stm32c0x.cfg`. Verified at [packages.debian.org/bookworm/openocd](https://packages.debian.org/bookworm/openocd) and the [v0.12.0 source tree](https://sourceforge.net/p/openocd/code/ci/v0.12.0/tree/tcl/target/). STM32C0 support exists only on master.
 
-`install.sh` builds OpenOCD from master:
+`install.sh` builds OpenOCD from master (cloned from the official GitHub mirror — the SourceForge `/p/openocd/code` URL is the project web page, not a git repo URL, so `git clone` would fail against it):
 
 ```bash
 sudo apt install -y libtool autoconf automake pkg-config \
                     libusb-1.0-0-dev libhidapi-dev texinfo
-git clone --depth=1 https://sourceforge.net/p/openocd/code openocd-src
+git clone --depth=1 https://github.com/openocd-org/openocd.git openocd-src
 cd openocd-src
 ./bootstrap
 ./configure --enable-stlink --disable-werror
 make -j2                         # ~25–40 min on Pi Zero 2 W with maxcpus=2
+                                 # (override via OPENOCD_JOBS=-j1 if OOM-killed)
 sudo make install                # installs to /usr/local/bin/openocd
 ```
 
@@ -300,6 +302,14 @@ All in `bash`, < 50 lines each, installed to `/usr/local/bin/`.
 ttyUSB0        STM            115200
 ttyUSB1        EL             115200
 ```
+
+**Format & validation rules** (enforced by `lib/parse-ports.sh`; `sl-monitor up` aborts on any violation rather than silently dropping the bad port):
+
+- `<kernel-device>`: must match `ttyUSB<digits>` or `ttyACM<digits>` (no `/dev/` prefix). Matches the udev rule and the systemd template's instance-name expectations.
+- `<name>`: `[A-Za-z0-9_-]+`. Used as a log subdirectory under `/var/log/pi-monitor/` and embedded in an `EnvironmentFile`, so it must be filesystem-safe and free of shell/path metacharacters.
+- `<baud>`: positive integer (digits only).
+- Duplicate `<name>` values across lines are rejected — two ports cannot share a log directory.
+- Trailing `#`-prefixed comments on data lines are allowed (e.g. `ttyUSB0 STM 115200 # primary`); any other trailing tokens are rejected as garbage.
 
 `sl-monitor up` parses this and writes one `EnvironmentFile` per port:
 ```

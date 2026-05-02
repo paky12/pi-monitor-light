@@ -92,8 +92,11 @@ git commit -m "feat: scaffold repo directory layout"
 #!/usr/bin/env bats
 
 @test "systemd unit file passes systemd-analyze verify" {
+  # Pass the file by path; --root= would look under <root>/etc/systemd/system/
+  # for the unit name, not resolve the file argument. --recursive-errors=no
+  # suppresses errors for EnvironmentFile= paths that exist only on the Pi.
   run systemd-analyze verify --recursive-errors=no \
-      --root=. systemd/uart-logger@.service
+      systemd/uart-logger@.service
   [ "$status" -eq 0 ]
 }
 
@@ -221,6 +224,12 @@ This is the only piece with real logic worth careful TDD.
 - Create: `tests/fixtures/ports-comments.conf`
 - Create: `tests/fixtures/ports-too-many.conf`
 - Create: `tests/fixtures/ports-bad-baud.conf`
+- Create: `tests/fixtures/ports-malformed.conf`
+- Create: `tests/fixtures/ports-trailing-garbage.conf`
+- Create: `tests/fixtures/ports-trailing-comment.conf`
+- Create: `tests/fixtures/ports-bad-dev.conf`
+- Create: `tests/fixtures/ports-bad-name.conf`
+- Create: `tests/fixtures/ports-dup-name.conf`
 
 **Step 1: Write the test fixtures**
 
@@ -295,6 +304,75 @@ setup() {
   run parse_ports /no/such/file.conf
   [ "$status" -ne 0 ]
 }
+
+@test "parse_ports rejects malformed line (return code 3)" {
+  run parse_ports tests/fixtures/ports-malformed.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"malformed"* ]]
+}
+
+@test "parse_ports rejects trailing garbage" {
+  run parse_ports tests/fixtures/ports-trailing-garbage.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"trailing garbage"* ]]
+}
+
+@test "parse_ports allows trailing # comments on data lines" {
+  run parse_ports tests/fixtures/ports-trailing-comment.conf
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "ttyUSB0 STM 115200" ]
+}
+
+@test "parse_ports rejects invalid device name" {
+  run parse_ports tests/fixtures/ports-bad-dev.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid device name"* ]]
+}
+
+@test "parse_ports rejects name with path traversal" {
+  run parse_ports tests/fixtures/ports-bad-name.conf
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid name"* ]]
+}
+
+@test "parse_ports rejects duplicate names (return code 6)" {
+  run parse_ports tests/fixtures/ports-dup-name.conf
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"duplicate name"* ]]
+}
+```
+
+Additional fixtures for the new tests:
+
+`tests/fixtures/ports-malformed.conf`:
+```
+ttyUSB0 STM
+```
+
+`tests/fixtures/ports-trailing-garbage.conf`:
+```
+ttyUSB0 STM 115200 garbage trailing words
+```
+
+`tests/fixtures/ports-trailing-comment.conf`:
+```
+ttyUSB0 STM 115200 # primary device
+```
+
+`tests/fixtures/ports-bad-dev.conf`:
+```
+eth0 STM 115200
+```
+
+`tests/fixtures/ports-bad-name.conf`:
+```
+ttyUSB0 ../etc 115200
+```
+
+`tests/fixtures/ports-dup-name.conf`:
+```
+ttyUSB0 STM 115200
+ttyUSB1 STM 115200
 ```
 
 **Step 3: Run tests — should fail (lib/parse-ports.sh doesn't exist)**
@@ -307,6 +385,7 @@ bats tests/parse-ports.bats
 
 ```bash
 #!/usr/bin/env bash
+# shellcheck shell=bash
 # parse-ports.sh — parse /etc/pi-monitor-light/ports.conf
 # Format per line: <kernel-device> <name> <baud>
 # Lines starting with # are ignored. Blank lines are ignored. Max 4 ports.
@@ -320,28 +399,54 @@ parse_ports() {
   fi
 
   local count=0
-  local dev name baud
+  local seen=''
+  local dev name baud rest
   while read -r dev name baud rest; do
     case $dev in ''|\#*) continue ;; esac
+    case $dev in
+      ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+      *) echo "parse_ports: invalid device name (must be ttyUSB<n> or ttyACM<n>): $dev" >&2
+         return 3 ;;
+    esac
     if [ -z "$name" ] || [ -z "$baud" ]; then
       echo "parse_ports: malformed line: $dev $name $baud" >&2
       return 3
     fi
+    case $name in
+      *[!A-Za-z0-9_-]*|'')
+        echo "parse_ports: invalid name (allowed chars: A-Z a-z 0-9 _ -): $name" >&2
+        return 3 ;;
+    esac
     case $baud in *[!0-9]*)
       echo "parse_ports: invalid baud (not numeric): $baud" >&2
       return 4
     ;; esac
+    case $rest in
+      ''|\#*) ;;
+      *) echo "parse_ports: trailing garbage on line: $dev $name $baud $rest" >&2
+         return 3 ;;
+    esac
     count=$((count + 1))
     if [ "$count" -gt 4 ]; then
       echo "parse_ports: max 4 ports allowed" >&2
       return 5
     fi
+    case " $seen " in
+      *" $name "*)
+        echo "parse_ports: duplicate name: $name" >&2
+        return 6 ;;
+    esac
+    seen="$seen $name"
     echo "$dev $name $baud"
   done < "$file"
 }
 
 # If sourced, expose the function. If executed directly, run on $1.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  if [ $# -lt 1 ]; then
+    echo "Usage: parse-ports.sh <ports.conf>" >&2
+    exit 64
+  fi
   parse_ports "$1"
 fi
 ```
@@ -411,6 +516,12 @@ git commit -m "feat: add ports.conf parser with validation"
   run shellcheck -x bin/sl-monitor
   [ "$status" -eq 0 ]
 }
+
+@test "sl-monitor restart with invalid port name exits 2" {
+  run bin/sl-monitor restart 'foo;bar'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid port"* ]]
+}
 ```
 
 **Step 2: Run tests — should fail**
@@ -421,6 +532,7 @@ git commit -m "feat: add ports.conf parser with validation"
 #!/usr/bin/env bash
 # sl-monitor — start/stop UART logger systemd units based on /etc/pi-monitor-light/ports.conf
 set -eu
+set -o pipefail
 
 CONF=/etc/pi-monitor-light/ports.conf
 ENV_DIR=/etc/pi-monitor-light
@@ -437,18 +549,19 @@ EOF
   exit 2
 }
 
-require_root() {
-  if [ "$(id -u)" -ne 0 ]; then
-    exec sudo --preserve-env=PATH "$0" "$@"
-  fi
-}
-
 write_env_files() {
   # shellcheck source=/dev/null
   . "$LIB"
+  # Pre-check: parse_ports failures inside `< <(...)` process substitution
+  # do not propagate under set -e (subshell). Run once first to abort early
+  # with a clear non-zero exit if the config is invalid.
+  parse_ports "$CONF" >/dev/null
   while read -r dev name baud; do
-    printf 'NAME=%s\nBAUD=%s\n' "$name" "$baud" \
-      > "$ENV_DIR/ports.conf.env-$dev"
+    local tmp="$ENV_DIR/.ports.conf.env-$dev.$$"
+    printf 'NAME=%s\nBAUD=%s\n' "$name" "$baud" > "$tmp"
+    # rename(2) is atomic on the same filesystem — readers see either
+    # the old file or the complete new file, never a torn write.
+    mv -f "$tmp" "$ENV_DIR/ports.conf.env-$dev"
   done < <(parse_ports "$CONF")
 }
 
@@ -458,23 +571,29 @@ active_units() {
 }
 
 cmd_up() {
-  require_root "$@"
   write_env_files
+  # Pre-check: same set -e / process-substitution gotcha as in write_env_files.
+  parse_ports "$CONF" >/dev/null
   while read -r dev _ _; do
     systemctl enable --now "uart-logger@${dev}.service"
   done < <(parse_ports "$CONF")
 }
 
 cmd_down() {
-  require_root "$@"
   for u in $(active_units); do
     systemctl disable --now "$u" || true
   done
 }
 
 cmd_restart() {
-  require_root "$@"
-  if [ "${1:-}" ]; then
+  if [ -n "${1:-}" ]; then
+    # Defensive re-validation — the top-level pre-flight already validated
+    # this for the non-root path, but check again here in case cmd_restart
+    # is ever called from a different code path.
+    case $1 in
+      ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+      *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $1" >&2; exit 2 ;;
+    esac
     systemctl restart "uart-logger@${1}.service"
   else
     for u in $(active_units); do
@@ -484,10 +603,29 @@ cmd_restart() {
 }
 
 case ${1:-} in
+  up|down|restart) ;;
+  *) usage ;;
+esac
+
+# Pre-validate restart's port arg before sudo, so error reporting is clean
+# and the bats tests can exercise this path as a regular user.
+if [ "$1" = "restart" ] && [ -n "${2:-}" ]; then
+  case $2 in
+    ttyUSB[0-9]*|ttyACM[0-9]*) ;;
+    *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $2" >&2; exit 2 ;;
+  esac
+fi
+
+# Privilege escalation must happen before we shift the subcommand off,
+# otherwise sudo re-execs the script with empty argv and falls into usage.
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo --preserve-env=PATH "$0" "$@"
+fi
+
+case $1 in
   up)      shift; cmd_up "$@" ;;
   down)    shift; cmd_down "$@" ;;
   restart) shift; cmd_restart "$@" ;;
-  *)       usage ;;
 esac
 ```
 
@@ -605,10 +743,21 @@ git commit -m "feat: add sl-ports listing wrapper"
   [ "$status" -eq 0 ]
 }
 
-@test "sl-status runs without args" {
+@test "sl-status runs without args and exits 0" {
   run bin/sl-status
-  # Status of non-existent units may be non-zero on dev machine; we only check it doesn't crash
-  [ "$status" -le 4 ]
+  [ "$status" -eq 0 ]
+}
+
+@test "sl-status reports (none active) when no logger units" {
+  run bin/sl-status
+  [[ "$output" == *"(none active)"* ]]
+}
+
+@test "sl-status reports (empty) when log dir exists but empty" {
+  tmp=$(mktemp -d)
+  LOG_DIR=$tmp run bin/sl-status
+  rmdir "$tmp"
+  [[ "$output" == *"(empty)"* ]]
 }
 ```
 
@@ -622,16 +771,26 @@ set -u
 LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
 
 echo '== Logger units =='
-systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' \
-  || echo '  (none active)'
+units=$(systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' 2>/dev/null || true)
+if [ -n "$units" ]; then
+  printf '%s\n' "$units"
+else
+  echo '  (none active)'
+fi
 
 echo
 echo '== Log sizes =='
-if [ -d "$LOG_DIR" ]; then
-  du -sh "$LOG_DIR"/* 2>/dev/null | sort -h \
-    || echo '  (empty)'
-else
+if [ ! -d "$LOG_DIR" ]; then
   echo "  ($LOG_DIR does not exist yet)"
+else
+  shopt -s nullglob
+  files=("$LOG_DIR"/*)
+  shopt -u nullglob
+  if [ ${#files[@]} -gt 0 ]; then
+    du -sh "${files[@]}" 2>/dev/null | sort -h
+  else
+    echo '  (empty)'
+  fi
 fi
 ```
 
@@ -674,7 +833,7 @@ git commit -m "feat: add sl-status overview wrapper"
 ```bash
 #!/usr/bin/env bash
 # sl-attach — open or attach a tmux session with one window per active logger
-set -eu
+set -euo pipefail
 
 SESSION=${SESSION:-pi-monitor}
 
@@ -688,7 +847,9 @@ active uart-logger@* unit, each running journalctl -f for that unit.
 EOF
 }
 
-[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && { usage; exit 0; }
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
 
 active_ports() {
   systemctl list-units --no-legend --type=service 'uart-logger@*' \
@@ -777,6 +938,21 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "sl-flash rejects file with spaces or special chars in name" {
+  echo dummy > "$FW_DIR/bad name.bin"
+  run bin/sl-flash "$FW_DIR/bad name.bin"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported characters"* ]]
+}
+
+@test "sl-flash rejects symlink resolving outside firmware dir" {
+  echo dummy > "$TMPDIR/outside.bin"
+  ln -s "$TMPDIR/outside.bin" "$FW_DIR/link.bin"
+  run bin/sl-flash "$FW_DIR/link.bin"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$FW_DIR"* ]]
+}
+
 @test "sl-flash invokes openocd with canonical command for valid .bin" {
   echo dummy > "$FW_DIR/firmware.bin"
   run bin/sl-flash "$FW_DIR/firmware.bin"
@@ -794,8 +970,10 @@ teardown() {
 #!/usr/bin/env bash
 # sl-flash — flash an STM32C091 .bin via OpenOCD over ST-Link
 set -eu
+set -o pipefail
 
 FW_DIR=${FW_DIR:-/var/lib/pi-monitor/firmware}
+FW_DIR=${FW_DIR%/}
 OPENOCD=${OPENOCD:-/usr/local/bin/openocd}
 
 usage() {
@@ -811,13 +989,25 @@ EOF
 [ $# -eq 1 ] || usage
 BIN=$1
 
-case $BIN in *.bin) ;; *) echo "sl-flash: not a .bin file: $BIN" >&2; exit 3 ;; esac
+case $BIN in
+  *.bin) ;;
+  *) echo "sl-flash: not a .bin file: $BIN" >&2; exit 3 ;;
+esac
 
 # Realpath check: refuse anything outside FW_DIR (no path traversal via symlinks).
 ABS=$(readlink -f -- "$BIN") || { echo "sl-flash: cannot resolve $BIN" >&2; exit 3; }
 case $ABS in
   "$FW_DIR"/*) ;;
   *) echo "sl-flash: $BIN is not under $FW_DIR" >&2; exit 3 ;;
+esac
+
+# Defense in depth: openocd's -c argument is parsed by Tcl. Reject any path
+# containing whitespace, quotes, or shell/Tcl metachars to prevent argument
+# splitting or command injection inside the program command.
+case $ABS in
+  *[[:space:]]*|*\"*|*\'*|*\$*|*\;*|*\\*|*\{*|*\}*|*\[*|*\]*)
+    echo "sl-flash: path contains unsupported characters: $ABS" >&2
+    exit 3 ;;
 esac
 
 [ -r "$ABS" ] || { echo "sl-flash: cannot read $ABS" >&2; exit 3; }
@@ -827,6 +1017,12 @@ exec "$OPENOCD" \
   -f target/stm32c0x.cfg \
   -c "program $ABS verify reset exit 0x08000000"
 ```
+
+**Notes on the directed enhancements over the original spec:**
+- `set -o pipefail` matches project convention (sl-monitor, sl-attach).
+- `FW_DIR=${FW_DIR%/}` strips a trailing slash so `case $ABS in "$FW_DIR"/*)` doesn't match `dir//file`.
+- The bad-character case statement closes the residual injection surface inside the openocd `-c "program $ABS …"` Tcl string. Without it, a filename like `foo.bin verify reset exit; reboot.bin` (if it could ever get past the `*.bin` and dir-check, which it can if the FW_DIR owner creates it) would be parsed as multiple Tcl tokens. Easier to just refuse weird names.
+- Two extra tests cover the bad-character path and the symlink-to-outside path.
 
 **Step 3: chmod +x, test, commit**
 
@@ -857,20 +1053,24 @@ git commit -m "feat: add sl-flash openocd wrapper with path validation"
   grep -q copytruncate etc/logrotate.d/pi-monitor
 }
 
-@test "config.txt fragment disables BT" {
+@test "config.txt fragment has all 4 power-tweak directives" {
   grep -q '^dtoverlay=disable-bt$' boot-overlay/config.txt.fragment
+  grep -q '^dtparam=act_led_trigger=none$' boot-overlay/config.txt.fragment
+  grep -q '^dtparam=act_led_activelow=off$' boot-overlay/config.txt.fragment
+  grep -q '^disable_splash=1$' boot-overlay/config.txt.fragment
 }
 
 @test "config.txt fragment does NOT reference pwr_led (no PWR LED on Zero 2 W)" {
   ! grep -q 'pwr_led' boot-overlay/config.txt.fragment
 }
 
-@test "cmdline fragment is single line" {
-  [ "$(wc -l < boot-overlay/cmdline.txt.fragment)" -le 1 ]
+@test "cmdline fragment has zero newlines (single token sequence, no trailing \n)" {
+  [ "$(wc -l < boot-overlay/cmdline.txt.fragment)" -eq 0 ]
 }
 
-@test "cmdline fragment contains maxcpus=2" {
+@test "cmdline fragment contains maxcpus=2 and consoleblank=0" {
   grep -q 'maxcpus=2' boot-overlay/cmdline.txt.fragment
+  grep -q 'consoleblank=0' boot-overlay/cmdline.txt.fragment
 }
 ```
 
@@ -878,6 +1078,8 @@ git commit -m "feat: add sl-flash openocd wrapper with path validation"
 
 `etc/logrotate.d/pi-monitor`:
 ```
+# tee -a in the systemd unit uses O_APPEND, so post-truncate writes resume
+# at offset 0 cleanly — copytruncate is the right rotation strategy here.
 /var/log/pi-monitor/*/*.log {
     weekly
     rotate 8
@@ -902,6 +1104,11 @@ disable_splash=1
 ```
 maxcpus=2 consoleblank=0
 ```
+
+> Note: cmdline.txt does not allow comments, so the leading-space-injection
+> requirement when appending this fragment to an existing cmdline.txt will be
+> handled by the appender logic in install.sh (Task 11/12), not in the fragment
+> itself.
 
 **Step 3: Test, commit**
 
@@ -941,6 +1148,14 @@ git commit -m "feat: add logrotate + boot-overlay fragments"
 @test "install.sh DRY_RUN=1 preflight succeeds without root" {
   run bash -c 'DRY_RUN=1 ./install.sh preflight'
   [ "$status" -eq 0 ]
+}
+
+@test "install.sh DRY_RUN=1 apt-deps lists key build deps" {
+  run bash -c 'DRY_RUN=1 ./install.sh apt-deps'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"libusb-1.0-0-dev"* ]]
+  [[ "$output" == *"libhidapi-dev"* ]]
+  [[ "$output" == *"DEBIAN_FRONTEND=noninteractive"* ]]
 }
 ```
 
@@ -998,22 +1213,32 @@ preflight() {
 install_apt_deps() {
   step 'apt deps'
   run apt-get update
-  run apt-get install -y \
-    tmux moreutils logrotate \
-    libtool autoconf automake pkg-config texinfo \
-    libusb-1.0-0-dev libhidapi-dev \
-    git ca-certificates curl
+  if [ "$DRY_RUN" = "1" ]; then
+    printf '+ DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold tmux moreutils logrotate libtool autoconf automake pkg-config texinfo libusb-1.0-0-dev libhidapi-dev git ca-certificates curl\n'
+  else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      -o Dpkg::Options::=--force-confdef \
+      -o Dpkg::Options::=--force-confold \
+      tmux moreutils logrotate \
+      libtool autoconf automake pkg-config texinfo \
+      libusb-1.0-0-dev libhidapi-dev \
+      git ca-certificates curl
+  fi
 }
 
 create_user_and_dirs() {
   step 'system user + directories'
   if ! id -u "$SVC_USER" >/dev/null 2>&1; then
-    run useradd --system --no-create-home --shell /usr/sbin/nologin \
-                --groups dialout,plugdev "$SVC_USER"
+    run useradd --system --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
   fi
-  # Add operator (the user that ran sudo) to the pi-monitor group so they can read logs.
+  # Always ensure required supplementary groups (idempotent — usermod -aG is additive).
+  # Guards against a previous install that created pi-monitor without dialout/plugdev.
+  run usermod -aG dialout,plugdev "$SVC_USER"
+  # Add operator (the user that ran sudo) to pi-monitor (logs) + plugdev (ST-Link) + dialout (UART).
   if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" != "1" ]; then
-    usermod -aG "$SVC_USER" "$SUDO_USER" || true
+    if ! usermod -aG "$SVC_USER",plugdev,dialout "$SUDO_USER"; then
+      echo "warning: failed to add $SUDO_USER to required groups; sl-flash and log access may fail" >&2
+    fi
   fi
   for d in "$SHARE_DIR" "$ETC_DIR" "$LOG_DIR" "$FW_DIR"; do
     run install -d -m 2775 -o "$SVC_USER" -g "$SVC_USER" "$d"
@@ -1108,7 +1333,8 @@ apply_power_tweaks() {
 
   if [ "$DRY_RUN" = "1" ]; then
     echo "+ append boot-overlay/config.txt.fragment to $cfg (if marker absent)"
-    echo "+ append 'maxcpus=2 consoleblank=0' to $cmd (if absent)"
+    echo "+ append '$(cat "$REPO_DIR/boot-overlay/cmdline.txt.fragment")' to $cmd (if maxcpus=2 absent)"
+    echo "+ systemctl disable --now hciuart.service (best-effort)"
     return
   fi
 
@@ -1157,6 +1383,12 @@ git commit -m "feat: install.sh file install + power tweaks step"
 - Modify: `install.sh`
 - Modify: `tests/install-preflight.bats` (add cases)
 
+**Notes:**
+- OpenOCD is cloned from the official GitHub mirror (`https://github.com/openocd-org/openocd.git`), not the SourceForge web URL — the latter is not a git repo URL and `git clone` would fail. The GitHub mirror is the project's officially-listed source and has better CDN performance on the Pi Zero 2 W's Wi-Fi.
+- The "already built" skip-check regex matches any 1.x+ release OR 0.13–0.99, so a future OpenOCD 1.0 release won't trigger a 30-minute rebuild.
+- `OPENOCD_JOBS` env var lets an operator hitting OOM rerun with `OPENOCD_JOBS=-j1 sudo ./install.sh openocd`. It's expanded by the outer bash before `sh -c`, so the inner shell sees the literal flag. Default is `-j2`.
+- `INSTALL_RPI_CONNECT={yes,no,prompt}` env var enables unattended runs of `./install.sh all`. `read -r ans || ans=n` falls back to "no" on EOF (e.g. stdin redirected from `/dev/null`).
+
 **Step 1: New tests**
 
 ```bash
@@ -1175,6 +1407,19 @@ git commit -m "feat: install.sh file install + power tweaks step"
   [[ "$output" == *"--ssh"* ]]
   [[ "$output" == *"--hostname=pi-monitor"* ]]
 }
+
+@test "install.sh openocd uses GitHub mirror not SourceForge web URL" {
+  run bash -c 'DRY_RUN=1 ./install.sh openocd'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"github.com/openocd-org/openocd"* ]]
+  [[ "$output" != *"sourceforge.net/p/openocd/code"* ]]
+}
+
+@test "install.sh rpi-connect honors INSTALL_RPI_CONNECT in DRY_RUN message" {
+  run bash -c 'DRY_RUN=1 ./install.sh rpi-connect'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INSTALL_RPI_CONNECT"* ]]
+}
 ```
 
 **Step 2: Add the new functions**
@@ -1183,15 +1428,22 @@ git commit -m "feat: install.sh file install + power tweaks step"
 build_openocd() {
   step 'build OpenOCD from master (Bookworm package is too old for STM32C0)'
   if [ -x "$PREFIX/bin/openocd" ] && "$PREFIX/bin/openocd" --version 2>&1 \
-       | grep -qE 'Open On-Chip Debugger 0\.(1[3-9]|[2-9][0-9])'; then
+       | grep -qE 'Open On-Chip Debugger ([1-9][0-9]*\.|0\.(1[3-9]|[2-9][0-9]))'; then
     echo 'openocd already built and recent enough; skipping'
     return
   fi
   local src=$REPO_DIR/openocd-src
   if [ ! -d "$src" ]; then
-    run git clone --depth=1 https://sourceforge.net/p/openocd/code "$src"
+    run git clone --depth=1 https://github.com/openocd-org/openocd.git "$src"
   fi
-  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make -j2 && make install"
+  # shellcheck disable=SC2086  # OPENOCD_JOBS may be empty or contain flags
+  run sh -c "cd '$src' && ./bootstrap && ./configure --enable-stlink --disable-werror && make ${OPENOCD_JOBS:--j2} && make install"
+  # OpenOCD's `make install` doesn't drop the contrib udev rule; do it ourselves.
+  if [ -f "$src/contrib/60-openocd.rules" ]; then
+    run install -m 0644 "$src/contrib/60-openocd.rules" /etc/udev/rules.d/60-openocd.rules
+    run udevadm control --reload-rules
+    run udevadm trigger
+  fi
 }
 
 install_tailscale() {
@@ -1207,11 +1459,19 @@ install_tailscale() {
 maybe_install_rpi_connect() {
   step 'rpi-connect-lite (optional)'
   if [ "$DRY_RUN" = "1" ]; then
-    echo '+ prompt user; if yes, apt install rpi-connect-lite + enable-linger'
+    echo '+ prompt user (or honor INSTALL_RPI_CONNECT={yes,no}); if yes, apt install rpi-connect-lite + enable-linger'
     return
   fi
-  printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
-  read -r ans
+  local ans
+  case ${INSTALL_RPI_CONNECT:-prompt} in
+    yes) ans=y ;;
+    no)  ans=n ;;
+    prompt)
+      printf 'Install rpi-connect-lite as fallback browser-shell access? [y/N] '
+      read -r ans || ans=n
+      ;;
+    *) echo "INSTALL_RPI_CONNECT must be yes/no/prompt (got: $INSTALL_RPI_CONNECT)" >&2; return 1 ;;
+  esac
   case $ans in
     y|Y|yes|YES)
       apt-get install -y rpi-connect-lite
@@ -1330,6 +1590,8 @@ run rm -f "$SHARE_DIR/parse-ports.sh"
 run rmdir --ignore-fail-on-non-empty "$SHARE_DIR" 2>/dev/null || true
 run rm -f /etc/systemd/system/uart-logger@.service
 run rm -f /etc/udev/rules.d/99-pi-monitor.rules
+# Note: this rule was installed by openocd's source build; we own it on uninstall.
+run rm -f /etc/udev/rules.d/60-openocd.rules
 run rm -f /etc/logrotate.d/pi-monitor
 run systemctl daemon-reload
 run udevadm control --reload-rules

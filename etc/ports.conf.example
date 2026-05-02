@@ -1,0 +1,10 @@
+# pi-monitor-light port configuration
+# One port per line, max 4 entries.
+# Format: <kernel-device> <name> <baud>
+# - <kernel-device>: ttyUSB0..3 or ttyACM0..3 (no /dev/ prefix)
+# - <name>: short label, used as log subdirectory name
+# - <baud>: integer
+# Lines starting with # and blank lines are ignored.
+
+ttyUSB0 STM 115200
+ttyUSB1 EL  115200

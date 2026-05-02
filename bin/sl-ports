@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# sl-ports — list configured + detected serial ports
+set -eu
+set -o pipefail
+
+CONF=${CONF:-/etc/pi-monitor-light/ports.conf}
+LIB=${LIB:-/usr/local/share/pi-monitor-light/parse-ports.sh}
+
+print_configured() {
+  printf '== Configured (%s) ==\n' "$CONF"
+  if [ ! -f "$CONF" ]; then
+    echo '  (no config file)'
+    return
+  fi
+  # shellcheck source=/dev/null
+  . "$LIB" 2>/dev/null || { echo "  (parser missing: $LIB)"; return; }
+  parse_ports "$CONF" | while read -r dev name baud; do
+    printf '  /dev/%-10s name=%-10s baud=%s\n' "$dev" "$name" "$baud"
+  done
+}
+
+print_detected() {
+  printf '\n== Detected (kernel) ==\n'
+  local found=0 d info
+  for d in /dev/ttyUSB[0-9]* /dev/ttyACM[0-9]*; do
+    [ -e "$d" ] || continue
+    found=1
+    # Tolerate udevadm being absent or returning errors; pipefail would
+    # otherwise abort the loop on hosts where udev info is unavailable.
+    info=$(udevadm info --query=property --name="$d" 2>/dev/null \
+      | awk -F= '/^ID_VENDOR=|^ID_MODEL=|^ID_SERIAL_SHORT=/ {print $2}' \
+      | paste -sd' ' - || true)
+    printf '  %s  %s\n' "$d" "$info"
+  done
+  [ "$found" -eq 0 ] && echo '  (none)'
+  return 0
+}
+
+print_configured
+print_detected
