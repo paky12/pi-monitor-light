@@ -134,14 +134,69 @@ From any laptop logged into the same Tailscale account:
 
 | Command | What it does |
 |---|---|
-| `sl-attach` | All ports in one tmux session (one window per port, live `journalctl -f`) |
-| `sl-attach <name\|device>` | Live-tail one port (no tmux). Run in separate terminal tabs for side-by-side viewing |
-| `sl-status` | Running loggers + log directory sizes |
-| `sl-ports` | Configured ports vs. kernel-detected USB devices |
-| `sl-monitor up\|down\|restart [port]` | Start/stop/restart loggers (per port or all) |
-| `sl-flash <bin>` | Flash a `.bin` from `/var/lib/pi-monitor/firmware/` via ST-Link |
+| `sl-attach` | All ports in one tmux session (one window per port, live `journalctl -f`). |
+| `sl-attach <name\|device>` | Live-tail one port (no tmux). Run in separate terminal tabs for side-by-side viewing. |
+| `sl-status` | Running loggers + log directory sizes. |
+| `sl-ports` | Configured ports vs. kernel-detected USB devices. |
+| `sl-monitor up` | Enable + start the loggers, and arm them across reboots / device re-plugs. |
+| `sl-monitor down` | Stop + disable all loggers — won't auto-resume on reboot or USB plug. |
+| `sl-monitor restart [name\|device]` | Restart one or all loggers — closes the current log file, opens a fresh one. |
+| `sl-flash <bin>` | Flash a `.bin` from `/var/lib/pi-monitor/firmware/` via ST-Link. |
 
-## Typical debugging loop
+For commands that take `<name|device>`, you can use either the friendly **name** from `ports.conf` (e.g. `STM`, `EL`) or the kernel **device** (e.g. `ttyUSB0`, `ttyACM1`).
+
+## Watching live logs
+
+Two viewing styles. Pick whichever fits your terminal habits — they don't conflict.
+
+**All ports in one tmux session** (default `sl-attach`):
+
+    sl-attach
+
+Switch windows with `Ctrl-b n` / `Ctrl-b p` — press the prefix, release, *then* the next key (they're separate keystrokes, not held together). Detach with `Ctrl-b d`; loggers keep running, reattach with `sl-attach` again. `Ctrl-b ?` lists every keybinding.
+
+**One terminal tab per port** (no tmux):
+
+    sl-attach STM      # in laptop tab 1
+    sl-attach EL       # in laptop tab 2
+    # third tab stays a free shell for sl-flash, sl-status, etc.
+
+Each invocation just runs `journalctl -f` for that one logger unit. `Ctrl-C` to exit. Use this style when you'd rather rely on your laptop's terminal app for layout than tmux's split-pane management.
+
+## Log sessions: how the loggers structure the data
+
+Each port's log file is a sequence of **sessions**. A session is one continuous capture, framed in the file by markers:
+
+    === SESSION START 2026-05-03T13:01:42+00:00  name=STM  dev=/dev/ttyUSB0  baud=115200
+    ...UART data...
+    === SESSION END   2026-05-03T15:42:18+00:00  duration=160m 36s
+
+A new session starts whenever the logger unit (re)starts. That happens **automatically** on:
+
+- DUT or USB-UART briefly disconnects then reconnects (`BindsTo=` + udev re-add)
+- the logger process crashes (`Restart=on-failure`)
+- the Pi reboots and the units come back up
+
+To **explicitly roll over** to a fresh log file (e.g. between two test runs you want filed separately):
+
+    sudo sl-monitor restart           # all ports
+    sudo sl-monitor restart STM       # one port (name or device)
+
+To **stop logging entirely** (won't auto-resume on reboot or replug):
+
+    sudo sl-monitor down
+
+To **wipe all past log history** and start absolutely clean:
+
+    sudo sl-monitor down
+    sudo rm -rf /var/log/pi-monitor/*/*.log*
+    sudo sl-monitor up
+
+The `=== SESSION START` / `=== SESSION END` markers are what makes the log a structured **uptime record** rather than just a flat byte stream. They're how you reconstruct, after the fact, exactly when the DUT went down and came back.
+
+## Workflow A — Iterative firmware development
+
+The build → flash → attach loop:
 
 1. Build `firmware.bin` on your laptop.
 2. Stage it on the Pi:
@@ -153,22 +208,47 @@ From any laptop logged into the same Tailscale account:
        ssh patrik@pi-monitor
        sl-flash /var/lib/pi-monitor/firmware/firmware.bin
 
-4. Watch the live UART output. Two styles, pick whichever you like:
+4. Watch the UART output (see [Watching live logs](#watching-live-logs) above).
 
-   **All ports in one tmux** (the default):
+5. Repeat. Logs from each session persist under `/var/log/pi-monitor/<name>/` and rotate via logrotate, so you can `grep` history later.
 
-       sl-attach
+## Workflow B — Long-running soak / stability tests
 
-   Switch windows with `Ctrl-b n` / `Ctrl-b p` (press the prefix, release, then the next key — they're separate keystrokes). Detach (loggers keep running) with `Ctrl-b d`. Re-attach by running `sl-attach` again.
+To find out *how stable a DUT is over days or weeks*, leave the loggers running and walk away. The architecture is built for this:
 
-   **One port per terminal tab** (no tmux):
+| Event | What survives |
+|---|---|
+| DUT crashes / resets but USB stays alive | Logger keeps the same session — bytes resume when the DUT recovers. |
+| DUT power-cycle drops the USB-UART | Unit stops cleanly with a `=== SESSION END` marker; udev re-adds the device, unit re-instantiates with a fresh log file. |
+| Pi reboot | Units are `WantedBy=multi-user.target` (set by `sl-monitor up`), so they come back automatically. |
+| You SSH out / laptop sleeps / network drops | Loggers are system-level systemd units, tied to no shell. Run `sl-attach` again whenever you reconnect. |
 
-       sl-attach STM      # in laptop tab 1
-       sl-attach EL       # in laptop tab 2
+**Kickoff (one command, then walk away):**
 
-   Use the `name` from `ports.conf` (or the kernel device, e.g. `ttyUSB0`). Each invocation just runs `journalctl -f` for that one unit; arrange the tabs in your laptop's terminal app for side-by-side viewing.
+    sudo sl-monitor up
 
-5. Session logs persist under `/var/log/pi-monitor/<name>/` and rotate via logrotate, so you can `grep` history later.
+**After hours / days / weeks, on the Pi:**
+
+    sl-attach STM                                       # live tail
+    grep -c '=== SESSION START' /var/log/pi-monitor/STM/*.log   # disconnect count
+    grep -h '=== SESSION ' /var/log/pi-monitor/STM/*.log | sort # disconnect timeline
+    du -sh /var/log/pi-monitor/STM                              # space used so far
+
+**When you're done:**
+
+    sudo sl-monitor down
+
+**Things to plan for in multi-week runs:**
+
+- **Disk space.** A continuously-talking 115200-baud UART produces ~10 KB/s = ~12 GB/week uncompressed; logrotate gzip's it weekly down to ~1.5 GB/week. With the default `rotate 8`, that's roughly **12 GB peak storage** per chatty port. Use a 32 GB+ SD card, or lower `rotate` in `/etc/logrotate.d/pi-monitor`, or quiet down the firmware's printing.
+- **SD card endurance.** Continuous-write workloads kill consumer cards in 3–12 months. For multi-month soak benches, use an industrial-rated card (e.g. SanDisk Industrial XI) or move `/var/log` onto a USB SSD on the Pi 4B.
+- **journald cap.** Bookworm's defaults can be too generous on a small SD. Cap with:
+
+      sudo mkdir -p /etc/systemd/journald.conf.d
+      echo -e "[Journal]\nSystemMaxUse=500M" | sudo tee /etc/systemd/journald.conf.d/cap.conf
+      sudo systemctl restart systemd-journald
+
+- **Power loss.** Soft Pi reboot recovers cleanly (loggers come back). Hard outage can corrupt the SD filesystem; for unattended benches, consider a UPS HAT or periodic SD backups.
 
 ## Files & paths
 

@@ -9,11 +9,13 @@ LIB=/usr/local/share/pi-monitor-light/parse-ports.sh
 
 usage() {
   cat >&2 <<EOF
-Usage: sl-monitor up|down|restart [port]
+Usage: sl-monitor up|down|restart [name|device]
 
-  up               enable + start logger units for all ports in $CONF
-  down             stop + disable all uart-logger@* units
-  restart [port]   restart one or all units
+  up                       enable + start logger units for all ports in $CONF
+  down                     stop + disable all uart-logger@* units
+  restart [name|device]    restart one or all units. Pass a friendly name
+                           from $CONF (e.g. STM) or a kernel device
+                           (e.g. ttyUSB0).
 EOF
   exit 2
 }
@@ -54,16 +56,40 @@ cmd_down() {
   done
 }
 
+resolve_port() {
+  # Accept either a kernel device or a friendly name from ports.conf;
+  # echo the kernel device on stdout.
+  local arg=$1
+  case $arg in
+    ttyUSB[0-9]*|ttyACM[0-9]*) printf '%s\n' "$arg"; return 0 ;;
+  esac
+  if [ ! -f "$CONF" ]; then
+    echo "sl-monitor: $CONF not found; cannot resolve name '$arg'" >&2
+    return 2
+  fi
+  if [ ! -f "$LIB" ]; then
+    echo "sl-monitor: parser library missing: $LIB" >&2
+    return 2
+  fi
+  # shellcheck source=/dev/null
+  . "$LIB"
+  local d n b
+  while read -r d n b; do
+    if [ "$n" = "$arg" ]; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+  done < <(parse_ports "$CONF")
+  echo "sl-monitor: no port named '$arg' in $CONF" >&2
+  echo "          (tip: 'sl-ports' shows configured names)" >&2
+  return 1
+}
+
 cmd_restart() {
   if [ -n "${1:-}" ]; then
-    # Defensive re-validation — the top-level pre-flight already validated
-    # this for the non-root path, but check again here in case cmd_restart
-    # is ever called from a different code path.
-    case $1 in
-      ttyUSB[0-9]*|ttyACM[0-9]*) ;;
-      *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $1" >&2; exit 2 ;;
-    esac
-    systemctl restart "uart-logger@${1}.service"
+    local dev
+    dev=$(resolve_port "$1")
+    systemctl restart "uart-logger@${dev}.service"
   else
     for u in $(active_units); do
       systemctl restart "$u"
@@ -78,10 +104,14 @@ esac
 
 # Pre-validate restart's port arg before sudo, so error reporting is clean
 # and the bats tests can exercise this path as a regular user.
+# Accept either a kernel device (ttyUSB<n>/ttyACM<n>) or a friendly name
+# (the [A-Za-z0-9_-]+ alphabet that parse-ports.sh enforces). The actual
+# name → device resolution happens after sudo, in cmd_restart.
 if [ "$1" = "restart" ] && [ -n "${2:-}" ]; then
   case $2 in
-    ttyUSB[0-9]*|ttyACM[0-9]*) ;;
-    *) echo "sl-monitor: invalid port (must be ttyUSB<n> or ttyACM<n>): $2" >&2; exit 2 ;;
+    ''|*[!A-Za-z0-9_-]*)
+      echo "sl-monitor: invalid port '$2' (allowed chars: A-Z a-z 0-9 _ -)" >&2
+      exit 2 ;;
   esac
 fi
 
