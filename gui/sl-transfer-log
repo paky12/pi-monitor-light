@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# sl-transfer-log — pull /var/log/pi-monitor logs from the Pi to a local dir.
+# Laptop-side companion to pi-monitor-light; Pi side stays unchanged.
+set -euo pipefail
+
+HOST=${HOST:-dev@pi-monitor}
+REMOTE_DIR=/var/log/pi-monitor
+
+usage() {
+  cat >&2 <<EOF
+Usage: sl-transfer-log [--host <user@host>] <local-dir>
+
+Pulls all per-port logs from the Pi ($REMOTE_DIR) into a timestamped
+subdir under <local-dir> via scp -r. Includes rotated .log.gz files.
+
+Options:
+  --host <user@host>   SSH target (default: $HOST; override via \$HOST too)
+  -h, --help           Show this help
+
+Examples:
+  sl-transfer-log ~/Desktop/pi-logs
+  sl-transfer-log --host patrik@pi-monitor.local ~/logs
+
+Prereqs:
+  - ssh \$HOST must succeed non-interactively (key auth or Tailscale SSH).
+  - Reuses your ~/.ssh/config (ControlMaster, etc.) automatically.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --host)
+      [ $# -ge 2 ] || { echo "sl-transfer-log: --host needs an argument" >&2; exit 2; }
+      HOST=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "sl-transfer-log: unknown flag: $1" >&2; usage; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+if [ $# -ne 1 ]; then
+  usage; exit 2
+fi
+
+LOCAL_DIR=$1
+HOSTPART=${HOST#*@}
+TS=$(date +%Y-%m-%d_%H-%M-%S)
+DEST="$LOCAL_DIR/${HOSTPART}-${TS}"
+
+mkdir -p "$DEST"
+
+echo "Pulling $HOST:$REMOTE_DIR/* → $DEST/"
+# BatchMode=yes: fail fast if key auth isn't set up, instead of prompting.
+scp -r -p -o BatchMode=yes "$HOST:$REMOTE_DIR/*" "$DEST/"
+
+count=$(find "$DEST" -type f | wc -l | tr -d ' ')
+size=$(du -sh "$DEST" 2>/dev/null | awk '{print $1}')
+echo
+echo "Done — $count files, $size → $DEST"

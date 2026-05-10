@@ -240,7 +240,7 @@ To find out *how stable a DUT is over days or weeks*, leave the loggers running 
 
 **Things to plan for in multi-week runs:**
 
-- **Disk space.** A continuously-talking 115200-baud UART produces ~10 KB/s = ~12 GB/week uncompressed; logrotate gzip's it weekly down to ~1.5 GB/week. With the default `rotate 8`, that's roughly **12 GB peak storage** per chatty port. Use a 32 GB+ SD card, or lower `rotate` in `/etc/logrotate.d/pi-monitor`, or quiet down the firmware's printing.
+- **Disk space.** A 115200-baud line *fully saturated* tops out at ~11.5 KB/s (~7 GB/week uncompressed, ~12 GB peak across the default `rotate 8` once logrotate's weekly gzip kicks in). Typical firmware is far quieter — bursty status prints often land in the tens of bytes/sec range, hundreds of times below that ceiling. Measure your own DUT for a few minutes (`du -sh /var/log/pi-monitor/<name>`) before sizing the SD card; only chatty test firmware needs the 32 GB+ headroom, otherwise a smaller card and the default `rotate` are plenty.
 - **SD card endurance.** Continuous-write workloads kill consumer cards in 3–12 months. For multi-month soak benches, use an industrial-rated card (e.g. SanDisk Industrial XI) or move `/var/log` onto a USB SSD on the Pi 4B.
 - **journald cap.** Bookworm's defaults can be too generous on a small SD. Cap with:
 
@@ -249,6 +249,21 @@ To find out *how stable a DUT is over days or weeks*, leave the loggers running 
       sudo systemctl restart systemd-journald
 
 - **Power loss.** Soft Pi reboot recovers cleanly (loggers come back). Hard outage can corrupt the SD filesystem; for unattended benches, consider a UPS HAT or periodic SD backups.
+
+## Pulling logs to your laptop
+
+A laptop-side helper in `gui/` does a recursive `scp` of `/var/log/pi-monitor/` into a timestamped folder under any local directory you choose:
+
+    ./gui/sl-transfer-log ~/Desktop/pi-logs
+
+Result: `~/Desktop/pi-logs/pi-monitor-<YYYY-MM-DD_HH-MM-SS>/` with every per-port subdir and rotated `.log.gz` preserved.
+
+The default SSH target is `dev@pi-monitor`. Override it per-call, or set it once in your shell:
+
+    ./gui/sl-transfer-log --host patrik@pi-monitor ~/Desktop/pi-logs
+    HOST=patrik@pi-monitor ./gui/sl-transfer-log ~/Desktop/pi-logs
+
+Needs non-interactive SSH (Tailscale SSH, or key auth with `ssh patrik@pi-monitor` already working without a password prompt).
 
 ## Files & paths
 
