@@ -15,7 +15,7 @@ Usage:
                              separate terminal tabs for side-by-side viewing.
                              <name>   matches the second column of ports.conf
                                       (e.g. STM, EL).
-                             <device> e.g. ttyUSB0, ttyACM1.
+                             <device> e.g. ttyUSB0, ttyACM1, /dev/ttyUSB0.
                              Ctrl-C to exit.
 EOF
 }
@@ -25,9 +25,10 @@ case "${1:-}" in
 esac
 
 resolve_port() {
-  # Accept either a kernel device or a friendly name from ports.conf;
-  # echo the kernel device on stdout.
+  # Accept either a kernel device (with or without /dev/ prefix) or a friendly
+  # name from ports.conf; echo the bare kernel device on stdout.
   local arg=$1
+  case $arg in /dev/*) arg=${arg#/dev/} ;; esac
   case $arg in
     ttyUSB[0-9]*|ttyACM[0-9]*) printf '%s\n' "$arg"; return 0 ;;
   esac
@@ -41,8 +42,8 @@ resolve_port() {
   fi
   # shellcheck source=/dev/null
   . "$LIB"
-  local dev name baud
-  while read -r dev name baud; do
+  local dev name _baud
+  while read -r dev name _baud; do
     if [ "$name" = "$arg" ]; then
       printf '%s\n' "$dev"
       return 0

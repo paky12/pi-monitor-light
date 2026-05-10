@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# sl-logs — list all log session files under /var/log/pi-monitor/
+set -u
+
+LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
+CONF=${CONF:-/etc/pi-monitor-light/ports.conf}
+LIB=${LIB:-/usr/local/share/pi-monitor-light/parse-ports.sh}
+
+usage() {
+  cat <<EOF
+Usage:
+  sl-logs                     List all log files across all ports.
+  sl-logs <name|device>       List log files for a single port.
+                              <name>   matches the second column of ports.conf
+                                       (e.g. STM, EL).
+                              <device> e.g. ttyUSB0, ttyACM1, /dev/ttyUSB0.
+
+Output is sorted by mtime (oldest first, newest last). Each row:
+  <relative-path>  <size>  <YYYY-MM-DD HH:MM>
+Includes rotated *.log.gz files.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
+if [ ! -d "$LOG_DIR" ]; then
+  echo "sl-logs: $LOG_DIR does not exist" >&2
+  exit 1
+fi
+
+# Resolve optional <name|device> argument to a subdirectory under $LOG_DIR.
+search_root=$LOG_DIR
+if [ $# -ge 1 ] && [ -n "$1" ]; then
+  arg=$1
+  case $arg in /dev/*) arg=${arg#/dev/} ;; esac
+  case $arg in
+    ttyUSB[0-9]*|ttyACM[0-9]*)
+      # Kernel device — look up the friendly name in ports.conf.
+      if [ ! -f "$LIB" ] || [ ! -f "$CONF" ]; then
+        echo "sl-logs: cannot resolve device '$arg' ($CONF or $LIB unavailable)" >&2
+        exit 2
+      fi
+      # shellcheck source=/dev/null
+      . "$LIB"
+      name=
+      while read -r d n _; do
+        if [ "$d" = "$arg" ]; then
+          name=$n
+          break
+        fi
+      done < <(parse_ports "$CONF")
+      if [ -z "$name" ]; then
+        echo "sl-logs: device '$arg' not in $CONF" >&2
+        exit 1
+      fi
+      search_root="$LOG_DIR/$name"
+      ;;
+    *)
+      # Treat as friendly name — must match an existing log subdir.
+      search_root="$LOG_DIR/$arg"
+      ;;
+  esac
+  if [ ! -d "$search_root" ]; then
+    echo "sl-logs: no log directory at $search_root" >&2
+    exit 1
+  fi
+fi
+
+# Find session files; tab-separated mtime / bytes / path; sort lex (mtime is
+# YYYY-MM-DD HH:MM so lex sort = chronological); awk into a tidy table.
+results=$(find "$search_root" -type f \( -name '*.log' -o -name '*.log.*' \) \
+            -printf '%TY-%Tm-%Td %TH:%TM\t%s\t%p\n' 2>/dev/null | sort)
+
+if [ -z "$results" ]; then
+  echo "  (no log files under $search_root)"
+  exit 0
+fi
+
+printf '%s\n' "$results" | awk -v base="$LOG_DIR/" -F'\t' '
+{
+  mtime = $1
+  bytes = $2
+  path  = $3
+  sub("^" base, "", path)
+  if      (bytes >= 1073741824) sz = sprintf("%.1fG", bytes/1073741824)
+  else if (bytes >= 1048576)    sz = sprintf("%.1fM", bytes/1048576)
+  else if (bytes >= 1024)       sz = sprintf("%dK",   bytes/1024)
+  else                          sz = sprintf("%dB",   bytes)
+  printf "%-50s  %7s  %s\n", path, sz, mtime
+}'

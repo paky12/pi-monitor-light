@@ -3,11 +3,27 @@
 set -u
 
 LOG_DIR=${LOG_DIR:-/var/log/pi-monitor}
+RUN_DIR=${RUN_DIR:-/run/pi-monitor}
 
 echo '== Logger units =='
 units=$(systemctl --no-pager --no-legend list-units --type=service 'uart-logger@*' 2>/dev/null || true)
 if [ -n "$units" ]; then
-  printf '%s\n' "$units"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    printf '%s\n' "$line"
+    unit=$(awk '{print $1}' <<<"$line")
+    dev=${unit#uart-logger@}
+    dev=${dev%.service}
+    cur="$RUN_DIR/${dev}.current"
+    log=
+    [ -r "$cur" ] && log=$(<"$cur")
+    if [ -n "$log" ] && [ -f "$log" ]; then
+      size=$(du -h "$log" 2>/dev/null | awk '{print $1}')
+      printf '    → %s (%s)\n' "$log" "$size"
+    else
+      printf '    → (no current log)\n'
+    fi
+  done <<<"$units"
 else
   echo '  (none active)'
 fi

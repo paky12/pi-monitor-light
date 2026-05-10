@@ -87,7 +87,7 @@ create_user_and_dirs() {
 
 install_files() {
   step 'install scripts + lib + unit + udev + logrotate'
-  for s in sl-monitor sl-attach sl-flash sl-ports sl-status; do
+  for s in sl-monitor sl-attach sl-flash sl-ports sl-status sl-logs; do
     run install -m 0755 "$REPO_DIR/bin/$s" "$PREFIX/bin/$s"
   done
   run install -m 0644 "$REPO_DIR/lib/parse-ports.sh" "$SHARE_DIR/parse-ports.sh"
@@ -163,7 +163,9 @@ build_openocd() {
 
 install_tailscale() {
   step 'tailscale (signed apt repo)'
-  if ! command -v tailscale >/dev/null 2>&1; then
+  # In DRY_RUN we always show the install plan, even when tailscale is already
+  # installed on the dev/CI host — otherwise the dry-run output is empty there.
+  if [ "$DRY_RUN" = "1" ] || ! command -v tailscale >/dev/null 2>&1; then
     # Re-source /etc/os-release here — preflight() sourced it inside its own
     # function scope, so VERSION_CODENAME isn't visible from here.
     local codename=
@@ -172,7 +174,15 @@ install_tailscale() {
     fi
     case $codename in
       bookworm|trixie) ;;
-      *) echo "tailscale: unsupported codename '$codename'; preflight should have caught this" >&2; return 1 ;;
+      *)
+        if [ "$DRY_RUN" = "1" ]; then
+          echo "tailscale: dev-host codename '$codename' is not bookworm/trixie; using 'bookworm' for dry-run preview" >&2
+          codename=bookworm
+        else
+          echo "tailscale: unsupported codename '$codename'; preflight should have caught this" >&2
+          return 1
+        fi
+        ;;
     esac
     run sh -c "curl -fsSL https://pkgs.tailscale.com/stable/debian/${codename}.noarmor.gpg \
                  -o /usr/share/keyrings/tailscale-archive-keyring.gpg"

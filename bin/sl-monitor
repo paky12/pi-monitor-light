@@ -73,8 +73,8 @@ resolve_port() {
   fi
   # shellcheck source=/dev/null
   . "$LIB"
-  local d n b
-  while read -r d n b; do
+  local d n _b
+  while read -r d n _b; do
     if [ "$n" = "$arg" ]; then
       printf '%s\n' "$d"
       return 0

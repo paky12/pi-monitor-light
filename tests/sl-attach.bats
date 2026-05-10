@@ -10,3 +10,9 @@
   [ "$status" -eq 0 ]
   [[ "$output" == *"tmux"* ]]
 }
+
+@test "sl-attach help mentions /dev/ device form" {
+  run bin/sl-attach -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/dev/ttyUSB0"* ]]
+}

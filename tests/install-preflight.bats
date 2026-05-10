@@ -51,7 +51,7 @@
 @test "install.sh DRY_RUN=1 tailscale prints install + up command" {
   run bash -c 'DRY_RUN=1 ./install.sh tailscale'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"tailscale.com/install.sh"* ]]
+  [[ "$output" == *"pkgs.tailscale.com"* ]]
   [[ "$output" == *"--ssh"* ]]
   [[ "$output" == *"--hostname=pi-monitor"* ]]
 }

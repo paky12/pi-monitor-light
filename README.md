@@ -136,14 +136,15 @@ From any laptop logged into the same Tailscale account:
 |---|---|
 | `sl-attach` | All ports in one tmux session (one window per port, live `journalctl -f`). |
 | `sl-attach <name\|device>` | Live-tail one port (no tmux). Run in separate terminal tabs for side-by-side viewing. |
-| `sl-status` | Running loggers + log directory sizes. |
+| `sl-status` | Running loggers, the log file each is currently writing to (with size), and log directory sizes. |
+| `sl-logs [name\|device]` | List every log session file under `/var/log/pi-monitor/` — relative path, size, mtime — sorted oldest → newest. Filter to one port by passing a name or device. |
 | `sl-ports` | Configured ports vs. kernel-detected USB devices. |
 | `sl-monitor up` | Enable + start the loggers, and arm them across reboots / device re-plugs. |
 | `sl-monitor down` | Stop + disable all loggers — won't auto-resume on reboot or USB plug. |
 | `sl-monitor restart [name\|device]` | Restart one or all loggers — closes the current log file, opens a fresh one. |
 | `sl-flash <bin>` | Flash a `.bin` from `/var/lib/pi-monitor/firmware/` via ST-Link. |
 
-For commands that take `<name|device>`, you can use either the friendly **name** from `ports.conf` (e.g. `STM`, `EL`) or the kernel **device** (e.g. `ttyUSB0`, `ttyACM1`).
+For commands that take `<name|device>`, you can use either the friendly **name** from `ports.conf` (e.g. `STM`, `EL`), the bare kernel **device** (e.g. `ttyUSB0`, `ttyACM1`), or the full path (e.g. `/dev/ttyUSB0`).
 
 ## Watching live logs
 

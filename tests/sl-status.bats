@@ -21,3 +21,10 @@
   rmdir "$tmp"
   [[ "$output" == *"(empty)"* ]]
 }
+
+@test "sl-status accepts RUN_DIR override without crashing" {
+  tmp=$(mktemp -d)
+  RUN_DIR=$tmp run bin/sl-status
+  rmdir "$tmp"
+  [ "$status" -eq 0 ]
+}
