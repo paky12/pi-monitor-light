@@ -153,7 +153,56 @@ Required content, in order:
    - `sed -n 'A,Bp' <file>` to read a specific range.
    - `zcat <file>.log.gz | grep -n PATTERN` for rotated files.
    - Never try to read a multi-MB file whole.
-4. **The `findings.md` schema** — copy verbatim from §7 of the v1 design doc, including the canonical "STM heartbeat stops mid-session" example. Append-only. Schema slots: Sessions, Timeline, Quantitative observations, Hypothesis (confidence), Repro recipe, Status.
+4. **The `findings.md` schema.** Append-only. Each finding is one H2 section.
+
+   **Header format:**
+   ```
+   ## <YYYY-MM-DD HH:MMZ> — <port> <one-line title> — [<severity>] [<state>]
+   ```
+   - **severity** ∈ `HIGH | MED | LOW`
+   - **state** ∈ `unconfirmed | confirmed | fixed | wontfix`
+
+   **Body slots, in this order:**
+
+   | Slot | Purpose |
+   |---|---|
+   | **Sessions:** | File paths + line ranges + comparison baselines |
+   | **Timeline (T = session start):** | Table: `T+` offset, wall-clock, event, log line |
+   | **Quantitative observations:** | Cadences, gaps, addresses, counts — numbers, not adjectives |
+   | **Hypothesis (analyzer, confidence):** | What's likely happening, and how sure |
+   | **Repro recipe:** | Detector pattern + suggested instrumentation (must be regex/threshold/state-machine-shaped) |
+   | **Status:** | `open` / `investigating` / `fixed` + commit ref if applicable |
+
+   **Canonical example** — paste this verbatim into CLAUDE.md as the "what good looks like" reference:
+
+   ```markdown
+   ## 2026-05-03 14:22Z — STM heartbeat stops mid-session — [HIGH] [unconfirmed]
+
+   **Sessions:**
+   - `STM/2026-05-03T13:01:42.log` lines 14823–14881
+   - baseline: `STM/2026-05-02T09:14:00.log` (24 h soak, no recurrence)
+
+   **Timeline (T = session start):**
+   | T+ | wall | event | log line |
+   |---|---|---|---|
+   | 00:00:00 | 13:01:42 | SESSION START | 1 |
+   | 00:46:57 | 13:48:39 | last `tick=2818` | 14879 |
+   | 00:46:58 | 13:48:40 | last printf `addr=0x20000378 val=0x4f` | 14880 |
+   | 00:47:01 | 13:48:43 | SESSION END (`Restart=on-failure`) | 14881 |
+
+   **Quantitative observations:**
+   - Expected tick cadence: 1.000 s ± 0.05 (measured, baseline)
+   - Gap from last tick → session end: 4.0 s (3 missed ticks)
+   - Last reported address: `0x20000378` — RAM region per RM0490; distance from `_estack=0x20005000` is 3.2 KB
+
+   **Hypothesis (analyzer, low confidence):** stack approaching reserved region during ISR. Not confirmed — could equally be UART TX FIFO stall or watchdog.
+
+   **Repro recipe:**
+   - Detector pattern: `tick=` cadence > 2× expected → mark suspect; followed by SESSION END within 5 s → confirm.
+   - Suggested instrumentation: add `stack_hwm=` printf in main loop and re-soak.
+
+   **Status:** open. Awaiting next soak after instrumentation.
+   ```
 5. **Three hard rules** — no paraphrase (cite log lines by file+line), append-only (state changes are new findings referencing old), specific enough to become a rule (Repro recipe is regex/threshold/state-machine-shaped).
 6. **LATS-style multi-hypothesis prompting** — when analyzing, generate 2–3 competing hypotheses (e.g. memory corruption / race / watchdog / FIFO stall), cite raw log evidence both supporting and refuting each, then commit to the most likely with a confidence (low/med/high) in the Hypothesis slot.
 7. **STM32C091 memory map reference** — RAM `0x2000_0000`–`0x2000_4FFF` (20 KB), flash `0x0800_0000`+, reset vector `0x0800_0000`. Cite [RM0490](https://www.st.com/resource/en/reference_manual/rm0490-stm32c0-series-advanced-armbased-32bit-mcus-stmicroelectronics.pdf).
@@ -226,7 +275,7 @@ git commit -m "docs: initial findings.md (empty append-only finding store)"
 
 **Step 2: Build fixtures**
 
-`findings.example.md` = the canonical example from v1 design §7 ("STM heartbeat stops mid-session"). `findings.bad-no-repro.md` = same content with the `**Repro recipe**` block removed.
+`findings.example.md` = the canonical "STM heartbeat stops mid-session" example inlined in Task 2 step 2 above. `findings.bad-no-repro.md` = same content with the `**Repro recipe:**` block removed.
 
 **Step 3: Implement**
 
